@@ -3,42 +3,45 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import 'auth_api.dart' as backend_auth;
 
 class KakaoLoginScreen extends StatelessWidget {
   const KakaoLoginScreen({super.key});
 
+  Future<OAuthToken?> _getKakaoToken() async {
+    if (await isKakaoTalkInstalled()) {
+      try {
+        return await UserApi.instance.loginWithKakaoTalk();
+      } catch (error) {
+        print('카카오톡 로그인 실패 $error');
+      }
+    }
+
+    try {
+      return await UserApi.instance.loginWithKakaoAccount();
+    } catch (error) {
+      print('카카오 계정 로그인 실패 $error');
+    }
+
+    return null;
+  }
+
   Future<void> _loginWithKakao(BuildContext context) async {
     try {
-      // 카카오톡 설치 여부 확인
-      if (await isKakaoTalkInstalled()) {
-        try {
-          // 카카오톡으로 로그인
-          await UserApi.instance.loginWithKakaoTalk();
-        } catch (error) {
-          print('카카오톡 로그인 실패 $error');
-          
-          // 카카오톡 로그인 실패 시 카카오 계정으로 로그인
-          try {
-            await UserApi.instance.loginWithKakaoAccount();
-          } catch (error) {
-            print('카카오 계정 로그인 실패 $error');
-          }
-        }
-      } else {
-        // 카카오톡 미설치 시 카카오 계정으로 로그인
-        try {
-          await UserApi.instance.loginWithKakaoAccount();
-        } catch (error) {
-          print('카카오 계정 로그인 실패 $error');
-        }
+      final token = await _getKakaoToken();
+      if (token == null) {
+        throw Exception('카카오 로그인 토큰을 가져오지 못했습니다');
       }
 
-      // 로그인 성공 후 사용자 정보 가져오기
-      User user = await UserApi.instance.me();
-      print('로그인 성공: ${user.kakaoAccount?.profile?.nickname}');
-      
-      // TODO: 방 로비 화면으로 이동
+      final loginResponse =
+          await backend_auth.AuthApi().loginWithKakao(token.accessToken);
+      print('백엔드 로그인 성공: ${loginResponse.user.nickname}');
+
       if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('로그인에 성공했습니다')),
+        );
+        // TODO: 방 로비 화면으로 이동
         // Navigator.pushReplacement(context, ...);
       }
     } catch (error) {
