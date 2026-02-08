@@ -1,10 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 
 class KakaoLoginScreen extends StatelessWidget {
   const KakaoLoginScreen({super.key});
+
+  Future<void> _loginWithKakao(BuildContext context) async {
+    try {
+      // 카카오톡 설치 여부 확인
+      if (await isKakaoTalkInstalled()) {
+        try {
+          // 카카오톡으로 로그인
+          await UserApi.instance.loginWithKakaoTalk();
+        } catch (error) {
+          print('카카오톡 로그인 실패 $error');
+          
+          // 카카오톡 로그인 실패 시 카카오 계정으로 로그인
+          try {
+            await UserApi.instance.loginWithKakaoAccount();
+          } catch (error) {
+            print('카카오 계정 로그인 실패 $error');
+          }
+        }
+      } else {
+        // 카카오톡 미설치 시 카카오 계정으로 로그인
+        try {
+          await UserApi.instance.loginWithKakaoAccount();
+        } catch (error) {
+          print('카카오 계정 로그인 실패 $error');
+        }
+      }
+
+      // 로그인 성공 후 사용자 정보 가져오기
+      User user = await UserApi.instance.me();
+      print('로그인 성공: ${user.kakaoAccount?.profile?.nickname}');
+      
+      // TODO: 방 로비 화면으로 이동
+      if (context.mounted) {
+        // Navigator.pushReplacement(context, ...);
+      }
+    } catch (error) {
+      print('로그인 실패: $error');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('로그인에 실패했습니다')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -92,8 +137,8 @@ class KakaoLoginScreen extends StatelessWidget {
                         width: double.infinity,
                         height: 52,
                         child: ElevatedButton(
-                          onPressed: () {
-                            // TODO: 카카오 로그인 로직
+                          onPressed: () async {
+                            await _loginWithKakao(context);
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.kakaoYellow,
