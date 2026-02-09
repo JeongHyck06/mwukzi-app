@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import '../auth/kakao_login_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -113,7 +114,12 @@ class HomeScreen extends StatelessWidget {
                   description: '친구들과 함께 결정하기',
                   isPrimary: true,
                   onTap: () {
-                    // TODO: 카카오 로그인 화면으로 이동
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const KakaoLoginScreen(),
+                      ),
+                    );
                   },
                 ),
                 const SizedBox(height: 16),
