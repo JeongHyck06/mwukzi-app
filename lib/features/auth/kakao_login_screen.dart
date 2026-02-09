@@ -37,6 +37,8 @@ class KakaoLoginScreen extends StatelessWidget {
           await backend_auth.AuthApi().loginWithKakao(token.accessToken);
       print('백엔드 로그인 성공: ${loginResponse.user.nickname}');
 
+      print('발급된 토큰: ${loginResponse.accessToken}');
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('로그인에 성공했습니다')),
