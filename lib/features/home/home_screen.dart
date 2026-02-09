@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../auth/kakao_login_screen.dart';
+import '../auth/join_room_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -130,7 +131,12 @@ class HomeScreen extends StatelessWidget {
                   description: '초대 코드 입력하기',
                   isPrimary: false,
                   onTap: () {
-                    // TODO: 코드 참여 화면으로 이동
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const JoinRoomScreen(),
+                      ),
+                    );
                   },
                 ),
                 const SizedBox(height: 16),
