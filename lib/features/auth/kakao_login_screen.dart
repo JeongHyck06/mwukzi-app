@@ -7,8 +7,15 @@ import '../room/room_api.dart';
 import '../room/room_lobby_screen.dart';
 import 'auth_api.dart' as backend_auth;
 
-class KakaoLoginScreen extends StatelessWidget {
+class KakaoLoginScreen extends StatefulWidget {
   const KakaoLoginScreen({super.key});
+
+  @override
+  State<KakaoLoginScreen> createState() => _KakaoLoginScreenState();
+}
+
+class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
+  bool _isAutoLogin = false;
 
   Future<OAuthToken?> _getKakaoToken() async {
     final cachedToken = await TokenManagerProvider.instance.manager.getToken();
@@ -33,7 +40,27 @@ class KakaoLoginScreen extends StatelessWidget {
     return null;
   }
 
-  Future<void> _loginWithKakao(BuildContext context) async {
+  @override
+  void initState() {
+    super.initState();
+    _tryAutoLogin();
+  }
+
+  Future<void> _tryAutoLogin() async {
+    final cachedToken = await TokenManagerProvider.instance.manager.getToken();
+    if (cachedToken == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _isAutoLogin = true;
+    });
+    await _loginWithKakao(context, silent: true);
+  }
+
+  Future<void> _loginWithKakao(
+    BuildContext context, {
+    bool silent = false,
+  }) async {
     try {
       final token = await _getKakaoToken();
       if (token == null) {
@@ -52,10 +79,13 @@ class KakaoLoginScreen extends StatelessWidget {
         accessToken: loginResponse.accessToken,
       );
 
-      if (context.mounted) {
+      if (context.mounted && !silent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('로그인에 성공했습니다')),
         );
+      }
+
+      if (context.mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -71,16 +101,32 @@ class KakaoLoginScreen extends StatelessWidget {
       }
     } catch (error) {
       print('로그인 실패: $error');
-      if (context.mounted) {
+      if (context.mounted && !silent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('로그인에 실패했습니다')),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAutoLogin = false;
+        });
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isAutoLogin) {
+      return Scaffold(
+        backgroundColor: AppColors.backgroundTint,
+        body: const SafeArea(
+          child: Center(
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: AppColors.backgroundTint,
       body: SafeArea(
