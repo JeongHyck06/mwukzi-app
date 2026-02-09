@@ -11,7 +11,7 @@ class KakaoLoginScreen extends StatelessWidget {
   const KakaoLoginScreen({super.key});
 
   Future<OAuthToken?> _getKakaoToken() async {
-    final cachedToken = await TokenManager.instance.getToken();
+    final cachedToken = await TokenManagerProvider.instance.manager.getToken();
     if (cachedToken != null) {
       return cachedToken;
     }
