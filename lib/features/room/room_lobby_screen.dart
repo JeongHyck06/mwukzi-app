@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import 'room_api.dart';
+import 'room_sse_client.dart';
+import 'models/room_participant_response.dart';
 
 enum ParticipantStatus { completed, inProgress }
 
@@ -44,8 +49,90 @@ class RoomLobbyScreen extends StatefulWidget {
 
 class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   bool _isLeaving = false;
+  bool _isConnecting = false;
+  List<RoomParticipant> _participants = [];
+  RoomSseClient? _sseClient;
+  StreamSubscription<String>? _sseSubscription;
 
   bool get _isHost => widget.accessToken != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectSse();
+  }
+
+  @override
+  void dispose() {
+    _sseSubscription?.cancel();
+    _sseClient?.close();
+    super.dispose();
+  }
+
+  void _connectSse() {
+    setState(() {
+      _isConnecting = true;
+    });
+    final url = RoomApi().buildSseUrl(inviteCode: widget.inviteCode);
+    _sseClient = createRoomSseClient(url);
+    _sseSubscription = _sseClient!.messages.listen((data) {
+      if (data.trim().isEmpty) {
+        return;
+      }
+      final decoded = jsonDecode(data);
+      if (decoded is List) {
+        final response = decoded
+            .map((item) => RoomParticipantResponse.fromJson(
+                item as Map<String, dynamic>))
+            .toList();
+        _updateParticipants(response);
+      }
+    }, onError: (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('실시간 연결 오류: $error')),
+        );
+      }
+    }, onDone: () {
+      if (mounted) {
+        setState(() {
+          _isConnecting = false;
+        });
+      }
+    });
+  }
+
+  void _updateParticipants(List<RoomParticipantResponse> response) {
+    final mapped = response
+        .map(
+          (participant) => RoomParticipant(
+            name: participant.displayName,
+            status: participant.hasSubmitted
+                ? ParticipantStatus.completed
+                : ParticipantStatus.inProgress,
+            isMe: participant.displayName == widget.displayName,
+          ),
+        )
+        .toList();
+
+    final hasMe = mapped.any((item) => item.isMe);
+    if (!hasMe && widget.displayName.isNotEmpty) {
+      mapped.add(
+        RoomParticipant(
+          name: widget.displayName,
+          status: ParticipantStatus.inProgress,
+          isMe: true,
+        ),
+      );
+    }
+
+    if (mounted) {
+      setState(() {
+        _participants = mapped;
+        _isConnecting = false;
+      });
+    }
+  }
 
   Future<void> _handleLeave() async {
     if (_isLeaving) {
@@ -87,15 +174,17 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final participantList = widget.participants.isNotEmpty
-        ? widget.participants
-        : [
-            RoomParticipant(
-              name: widget.displayName,
-              status: ParticipantStatus.inProgress,
-              isMe: true,
-            ),
-          ];
+    final participantList = _participants.isNotEmpty
+        ? _participants
+        : widget.participants.isNotEmpty
+            ? widget.participants
+            : [
+                RoomParticipant(
+                  name: widget.displayName,
+                  status: ParticipantStatus.inProgress,
+                  isMe: true,
+                ),
+              ];
     return WillPopScope(
       onWillPop: () async {
         await _handleLeave();
@@ -129,6 +218,15 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                       '방 로비',
                       style: AppTextStyles.headingM,
                     ),
+                    const Spacer(),
+                    if (_isConnecting)
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      )
                   ],
                 ),
               ),
