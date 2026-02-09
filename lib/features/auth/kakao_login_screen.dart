@@ -47,6 +47,10 @@ class KakaoLoginScreen extends StatelessWidget {
       final roomResponse = await RoomApi().createRoom(
         accessToken: loginResponse.accessToken,
       );
+      await RoomApi().joinAsHost(
+        roomId: roomResponse.roomId,
+        accessToken: loginResponse.accessToken,
+      );
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
