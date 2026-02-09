@@ -3,12 +3,19 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import '../room/room_api.dart';
+import '../room/room_lobby_screen.dart';
 import 'auth_api.dart' as backend_auth;
 
 class KakaoLoginScreen extends StatelessWidget {
   const KakaoLoginScreen({super.key});
 
   Future<OAuthToken?> _getKakaoToken() async {
+    final cachedToken = await TokenManagerProvider.instance.manager.getToken();
+    if (cachedToken != null) {
+      return cachedToken;
+    }
+
     if (await isKakaoTalkInstalled()) {
       try {
         return await UserApi.instance.loginWithKakaoTalk();
@@ -37,14 +44,30 @@ class KakaoLoginScreen extends StatelessWidget {
           await backend_auth.AuthApi().loginWithKakao(token.accessToken);
       print('백엔드 로그인 성공: ${loginResponse.user.nickname}');
 
-      print('발급된 토큰: ${loginResponse.accessToken}');
+      final roomResponse = await RoomApi().createRoom(
+        accessToken: loginResponse.accessToken,
+      );
+      await RoomApi().joinAsHost(
+        roomId: roomResponse.roomId,
+        accessToken: loginResponse.accessToken,
+      );
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('로그인에 성공했습니다')),
         );
-        // TODO: 방 로비 화면으로 이동
-        // Navigator.pushReplacement(context, ...);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => RoomLobbyScreen(
+              roomId: roomResponse.roomId,
+              inviteCode: roomResponse.inviteCode,
+              displayName: loginResponse.user.nickname,
+              roomStatus: roomResponse.roomStatus,
+              accessToken: loginResponse.accessToken,
+            ),
+          ),
+        );
       }
     } catch (error) {
       print('로그인 실패: $error');
