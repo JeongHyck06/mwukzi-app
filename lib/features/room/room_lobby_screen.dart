@@ -55,6 +55,8 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   bool _isConnecting = false;
   List<RoomParticipant> _participants = [];
   final Map<String, String> _preferenceByParticipantId = {};
+  final Map<String, List<String>> _chipsByParticipantId = {};
+  final Map<String, String> _freeTextByParticipantId = {};
   RoomSseClient? _sseClient;
   StreamSubscription<String>? _sseSubscription;
 
@@ -66,6 +68,32 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
       return id;
     }
     return participant.isMe ? 'me' : 'name:${participant.name}';
+  }
+
+  List<RoomParticipant> _buildParticipantList() {
+    if (_participants.isNotEmpty) {
+      return _participants;
+    }
+    if (widget.participants.isNotEmpty) {
+      return widget.participants;
+    }
+    return [
+      RoomParticipant(
+        participantId: widget.participantId ?? 'me',
+        name: widget.displayName,
+        status: ParticipantStatus.inProgress,
+        isMe: true,
+      ),
+    ];
+  }
+
+  bool _areAllParticipantsCompleted(List<RoomParticipant> participantList) {
+    if (participantList.isEmpty) {
+      return false;
+    }
+    return participantList.every(
+      (participant) => participant.status == ParticipantStatus.completed,
+    );
   }
 
   @override
@@ -188,18 +216,8 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final participantList = _participants.isNotEmpty
-        ? _participants
-        : widget.participants.isNotEmpty
-            ? widget.participants
-            : [
-                RoomParticipant(
-                  participantId: widget.participantId ?? 'me',
-                  name: widget.displayName,
-                  status: ParticipantStatus.inProgress,
-                  isMe: true,
-                ),
-              ];
+    final participantList = _buildParticipantList();
+    final allCompleted = _areAllParticipantsCompleted(participantList);
     return WillPopScope(
       onWillPop: () async {
         await _handleLeave();
@@ -275,12 +293,20 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         height: 52,
                         child: ElevatedButton(
                           onPressed: () async {
+                            final myParticipantKey = widget.participantId ?? 'me';
                             final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => PreferenceInputScreen(
                                   roomId: widget.roomId,
                                   participantId: widget.participantId,
+                                  initialSelectedTags: List<String>.from(
+                                    _chipsByParticipantId[myParticipantKey] ??
+                                        const <String>[],
+                                  ),
+                                  initialFreeText:
+                                      _freeTextByParticipantId[myParticipantKey] ??
+                                          '',
                                 ),
                               ),
                             );
@@ -288,10 +314,21 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                                 result['formattedPreference'] is String &&
                                 mounted) {
                               final id = widget.participantId ?? 'me';
+                              final chips = result['chips'] is List
+                                  ? (result['chips'] as List)
+                                      .map((item) => item.toString())
+                                      .toList()
+                                  : <String>[];
+                              final freeText = result['freeText'] is String
+                                  ? result['freeText'] as String
+                                  : '';
+                              final currentList = _buildParticipantList();
                               setState(() {
                                 _preferenceByParticipantId[id] =
                                     result['formattedPreference'] as String;
-                                _participants = _participants
+                                _chipsByParticipantId[id] = chips;
+                                _freeTextByParticipantId[id] = freeText;
+                                _participants = currentList
                                     .map(
                                       (p) => p.participantId == id
                                           ? RoomParticipant(
@@ -332,11 +369,23 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         width: double.infinity,
                         height: 52,
                         child: OutlinedButton(
-                          onPressed: null,
+                          onPressed: allCompleted
+                              ? () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('추천 시작 준비 완료'),
+                                    ),
+                                  );
+                                }
+                              : null,
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.textSecondary,
-                            side: const BorderSide(
-                              color: AppColors.border,
+                            foregroundColor: allCompleted
+                                ? AppColors.primaryMain
+                                : AppColors.textSecondary,
+                            side: BorderSide(
+                              color: allCompleted
+                                  ? AppColors.primaryMain
+                                  : AppColors.border,
                               width: 1,
                             ),
                             shape: RoundedRectangleBorder(
@@ -344,9 +393,13 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                             ),
                           ),
                           child: Text(
-                            '모두 입력 완료 시 추천 시작',
+                            allCompleted
+                                ? '추천 시작'
+                                : '모두 입력 완료 시 추천 시작',
                             style: AppTextStyles.bodyM.copyWith(
-                              color: AppColors.textSecondary,
+                              color: allCompleted
+                                  ? AppColors.primaryMain
+                                  : AppColors.textSecondary,
                             ),
                           ),
                         ),
