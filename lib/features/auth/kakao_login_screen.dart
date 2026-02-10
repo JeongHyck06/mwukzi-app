@@ -6,6 +6,7 @@ import '../../core/constants/app_text_styles.dart';
 import '../room/room_api.dart';
 import '../room/room_lobby_screen.dart';
 import 'auth_api.dart' as backend_auth;
+import 'models/login_response.dart';
 
 class KakaoLoginScreen extends StatefulWidget {
   const KakaoLoginScreen({super.key});
@@ -17,10 +18,12 @@ class KakaoLoginScreen extends StatefulWidget {
 class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
   bool _isAutoLogin = false;
 
-  Future<OAuthToken?> _getKakaoToken() async {
-    final cachedToken = await TokenManagerProvider.instance.manager.getToken();
-    if (cachedToken != null) {
-      return cachedToken;
+  Future<OAuthToken?> _getKakaoToken({bool useCachedToken = true}) async {
+    if (useCachedToken) {
+      final cachedToken = await TokenManagerProvider.instance.manager.getToken();
+      if (cachedToken != null) {
+        return cachedToken;
+      }
     }
 
     if (await isKakaoTalkInstalled()) {
@@ -38,6 +41,17 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
     }
 
     return null;
+  }
+
+  bool _isBackendConnectionError(Object error) {
+    final message = error.toString();
+    return message.contains('Connection refused') ||
+        message.contains('SocketException');
+  }
+
+  bool _isBackendUnauthorizedError(Object error) {
+    final message = error.toString();
+    return message.contains('(401)') || message.contains('KAKAO_UNAUTHORIZED');
   }
 
   @override
@@ -62,13 +76,28 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
     bool silent = false,
   }) async {
     try {
-      final token = await _getKakaoToken();
+      OAuthToken? token = await _getKakaoToken();
       if (token == null) {
         throw Exception('카카오 로그인 토큰을 가져오지 못했습니다');
       }
 
-      final loginResponse =
-          await backend_auth.AuthApi().loginWithKakao(token.accessToken);
+      final authApi = backend_auth.AuthApi();
+      late LoginResponse loginResponse;
+      try {
+        loginResponse = await authApi.loginWithKakao(token.accessToken);
+      } catch (error) {
+        if (_isBackendUnauthorizedError(error)) {
+          // 캐시 토큰이 만료/무효일 수 있어 토큰 초기화 후 1회 재시도
+          await UserApi.instance.logout();
+          token = await _getKakaoToken(useCachedToken: false);
+          if (token == null) {
+            throw Exception('카카오 로그인을 다시 시도해 주세요');
+          }
+          loginResponse = await authApi.loginWithKakao(token.accessToken);
+        } else {
+          rethrow;
+        }
+      }
       print('백엔드 로그인 성공: ${loginResponse.user.nickname}');
 
       final roomResponse = await RoomApi().createRoom(
@@ -102,6 +131,18 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
     } catch (error) {
       print('로그인 실패: $error');
       if (context.mounted && !silent) {
+        if (_isBackendConnectionError(error)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('백엔드 서버 연결에 실패했습니다. 서버 실행 상태를 확인해 주세요.')),
+          );
+          return;
+        }
+        if (_isBackendUnauthorizedError(error)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('카카오 인증이 만료되었거나 유효하지 않습니다. 다시 로그인해 주세요.')),
+          );
+          return;
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('로그인에 실패했습니다')),
         );
@@ -216,7 +257,7 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.kakaoYellow,
-                            foregroundColor: AppColors.textPrimary.withOpacity(0.9),
+                            foregroundColor: AppColors.textPrimary.withValues(alpha: 0.9),
                             elevation: 0,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(20),
@@ -229,7 +270,7 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
                           child: Text(
                             '카카오로 시작하기',
                             style: AppTextStyles.buttonText.copyWith(
-                              color: AppColors.textPrimary.withOpacity(0.9),
+                              color: AppColors.textPrimary.withValues(alpha: 0.9),
                             ),
                           ),
                         ),
