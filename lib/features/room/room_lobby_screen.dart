@@ -628,9 +628,36 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     );
   }
 
-  void _showParticipantPreferenceModal(RoomParticipant participant) {
-    final preferenceText = _findParticipantPreference(participant);
+  Future<void> _showParticipantPreferenceModal(RoomParticipant participant) async {
+    String? preferenceText = _findParticipantPreference(participant);
+    final participantId = participant.participantId;
+
+    if ((preferenceText == null || preferenceText.trim().isEmpty) &&
+        participant.status == ParticipantStatus.completed &&
+        participantId != null &&
+        participantId.isNotEmpty &&
+        participantId != 'me') {
+      try {
+        final response = await RoomApi().getParticipantPreference(
+          roomId: widget.roomId,
+          participantId: participantId,
+        );
+        final fetchedText = response.preferenceText.trim();
+        if (fetchedText.isNotEmpty && mounted) {
+          setState(() {
+            _preferenceByParticipantId[participantId] = fetchedText;
+          });
+          preferenceText = fetchedText;
+        }
+      } catch (_) {
+        // 상세 취향 조회 실패 시 기본 안내 문구를 노출합니다.
+      }
+    }
+
     final hasPreference = preferenceText != null && preferenceText.trim().isNotEmpty;
+    if (!mounted) {
+      return;
+    }
 
     showModalBottomSheet<void>(
       context: context,
@@ -671,7 +698,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                   ),
                   child: Text(
                     hasPreference
-                        ? preferenceText
+                        ? preferenceText!
                         : participant.status == ParticipantStatus.completed
                             ? '입력 완료 상태입니다.\n서버 연동 후 상세 취향을 불러올 수 있어요.'
                             : '아직 취향을 입력하지 않았어요.',

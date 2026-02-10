@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/constants/api_config.dart';
 import 'models/create_room_response.dart';
+import 'models/participant_preference_response.dart';
 import 'models/room_participant_response.dart';
 
 class RoomApi {
@@ -160,6 +161,24 @@ class RoomApi {
 
     throw Exception(
       '취향 제출 실패 (${response.statusCode}): ${response.body}',
+    );
+  }
+
+  Future<ParticipantPreferenceResponse> getParticipantPreference({
+    required String roomId,
+    required String participantId,
+  }) async {
+    final uri =
+        ApiConfig.buildUri('/api/v1/rooms/$roomId/preferences/$participantId');
+    final response = await http.get(uri);
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return ParticipantPreferenceResponse.fromJson(data);
+    }
+
+    throw Exception(
+      '취향 상세 조회 실패 (${response.statusCode}): ${response.body}',
     );
   }
 }
