@@ -5,18 +5,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import '../ai_result/ai_result_screen.dart';
+import '../preference/preference_input_screen.dart';
+import 'models/menu_recommendation_response.dart';
 import 'room_api.dart';
+import 'room_ai_api.dart';
 import 'room_sse_client.dart';
 import 'models/room_participant_response.dart';
 
 enum ParticipantStatus { completed, inProgress }
 
 class RoomParticipant {
+  final String? participantId;
   final String name;
   final ParticipantStatus status;
   final bool isMe;
 
   const RoomParticipant({
+    required this.participantId,
     required this.name,
     required this.status,
     this.isMe = false,
@@ -50,11 +56,214 @@ class RoomLobbyScreen extends StatefulWidget {
 class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   bool _isLeaving = false;
   bool _isConnecting = false;
+  bool _isRecommending = false;
   List<RoomParticipant> _participants = [];
+  MenuRecommendationResponse? _latestRecommendation;
+  String? _latestRecommendationSignature;
+  final Map<String, String> _preferenceByParticipantId = {};
+  final Map<String, List<String>> _chipsByParticipantId = {};
+  final Map<String, String> _freeTextByParticipantId = {};
   RoomSseClient? _sseClient;
   StreamSubscription<String>? _sseSubscription;
 
   bool get _isHost => widget.accessToken != null;
+
+  String _participantKey(RoomParticipant participant) {
+    final id = participant.participantId?.trim();
+    if (id != null && id.isNotEmpty) {
+      return id;
+    }
+    return participant.isMe ? 'me' : 'name:${participant.name}';
+  }
+
+  String _resolveParticipantPreference(RoomParticipant participant) {
+    final preference = _findParticipantPreference(participant);
+    if (preference != null && preference.trim().isNotEmpty) {
+      return preference;
+    }
+    return '${participant.name}님은 취향 입력을 완료했습니다.';
+  }
+
+  String? _findParticipantPreference(RoomParticipant participant) {
+    final keys = <String>{
+      _participantKey(participant),
+    };
+    if (participant.isMe) {
+      keys.add('me');
+      if (widget.participantId != null && widget.participantId!.isNotEmpty) {
+        keys.add(widget.participantId!);
+      }
+    }
+    for (final key in keys) {
+      final value = _preferenceByParticipantId[key];
+      if (value != null && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
+  List<RoomParticipant> _buildParticipantList() {
+    if (_participants.isNotEmpty) {
+      return _participants;
+    }
+    if (widget.participants.isNotEmpty) {
+      return widget.participants;
+    }
+    return [
+      RoomParticipant(
+        participantId: widget.participantId ?? 'me',
+        name: widget.displayName,
+        status: ParticipantStatus.inProgress,
+        isMe: true,
+      ),
+    ];
+  }
+
+  bool _areAllParticipantsCompleted(List<RoomParticipant> participantList) {
+    if (participantList.isEmpty) {
+      return false;
+    }
+    return participantList.every(
+      (participant) => participant.status == ParticipantStatus.completed,
+    );
+  }
+
+  List<Map<String, String>> _buildRecommendationParticipants(
+    List<RoomParticipant> participantList,
+  ) {
+    return participantList.map((participant) {
+      return {
+        'name': participant.name,
+        'preference': _resolveParticipantPreference(participant),
+      };
+    }).toList();
+  }
+
+  String _buildRecommendationSignature(
+    List<Map<String, String>> participants,
+  ) {
+    final normalized = participants
+        .map((p) => '${p['name']}:${p['preference']}')
+        .toList()
+      ..sort();
+    return normalized.join('|');
+  }
+
+  Future<void> _startRecommendation(List<RoomParticipant> participantList) async {
+    if (_isRecommending) {
+      return;
+    }
+    if (!_isHost || widget.accessToken == null || widget.accessToken!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('방장만 추천을 시작할 수 있어요')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isRecommending = true;
+    });
+
+    try {
+      final participants = _buildRecommendationParticipants(participantList);
+      final signature = _buildRecommendationSignature(participants);
+      final response = await RoomAiApi().recommendMenu(
+        roomId: widget.roomId,
+        participants: participants,
+        accessToken: widget.accessToken!,
+        count: 5,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _latestRecommendation = response;
+        _latestRecommendationSignature = signature;
+      });
+      _openAiResultScreen(response);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('추천 시작에 실패했습니다: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRecommending = false;
+        });
+      }
+    }
+  }
+
+  String _recommendationButtonLabel({
+    required bool allCompleted,
+    required bool canOpenCachedRecommendation,
+  }) {
+    if (_isRecommending) {
+      return _isHost ? '추천 생성 중...' : '추천 조회 중...';
+    }
+    if (!_isHost) {
+      return '추천 목록 조회하기';
+    }
+    if (_latestRecommendation != null && canOpenCachedRecommendation) {
+      return '추천 목록 조회하기';
+    }
+    if (_latestRecommendation != null && !canOpenCachedRecommendation) {
+      return '다시 추천 받기';
+    }
+    if (!allCompleted) {
+      return '모두 입력 완료 시 추천 시작';
+    }
+    return '추천 시작';
+  }
+
+  Future<void> _handleRecommendationButtonTap(
+    List<RoomParticipant> participantList,
+    bool canOpenCachedRecommendation,
+  ) async {
+    if (_isRecommending) {
+      return;
+    }
+    if (_latestRecommendation != null && canOpenCachedRecommendation) {
+      _openAiResultScreen(_latestRecommendation!);
+      return;
+    }
+    if (!_isHost) {
+      setState(() {
+        _isRecommending = true;
+      });
+      try {
+        final latest = await RoomAiApi().getLatestRecommendation(
+          roomId: widget.roomId,
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _latestRecommendation = latest;
+        });
+        _openAiResultScreen(latest);
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('아직 방장이 추천을 시작하지 않았어요')),
+        );
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isRecommending = false;
+          });
+        }
+      }
+      return;
+    }
+    await _startRecommendation(participantList);
+  }
 
   @override
   void initState() {
@@ -86,6 +295,17 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                 item as Map<String, dynamic>))
             .toList();
         _updateParticipants(response);
+      } else if (decoded is Map<String, dynamic>) {
+        try {
+          final recommendation = MenuRecommendationResponse.fromJson(decoded);
+          if (mounted) {
+            setState(() {
+              _latestRecommendation = recommendation;
+            });
+          }
+        } catch (_) {
+          // participants 이벤트 외 데이터는 파싱 실패 시 무시
+        }
       }
     }, onError: (error) {
       if (mounted) {
@@ -106,6 +326,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     final mapped = response
         .map(
           (participant) => RoomParticipant(
+            participantId: participant.participantId,
             name: participant.displayName,
             status: participant.hasSubmitted
                 ? ParticipantStatus.completed
@@ -119,6 +340,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     if (!hasMe && widget.displayName.isNotEmpty) {
       mapped.add(
         RoomParticipant(
+          participantId: 'me',
           name: widget.displayName,
           status: ParticipantStatus.inProgress,
           isMe: true,
@@ -174,17 +396,14 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final participantList = _participants.isNotEmpty
-        ? _participants
-        : widget.participants.isNotEmpty
-            ? widget.participants
-            : [
-                RoomParticipant(
-                  name: widget.displayName,
-                  status: ParticipantStatus.inProgress,
-                  isMe: true,
-                ),
-              ];
+    final participantList = _buildParticipantList();
+    final allCompleted = _areAllParticipantsCompleted(participantList);
+    final recommendationParticipants =
+        _buildRecommendationParticipants(participantList);
+    final currentRecommendationSignature =
+        _buildRecommendationSignature(recommendationParticipants);
+    final canOpenCachedRecommendation = _latestRecommendation != null &&
+        (!_isHost || _latestRecommendationSignature == currentRecommendationSignature);
     return WillPopScope(
       onWillPop: () async {
         await _handleLeave();
@@ -247,7 +466,11 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                       ...participantList.map(
                         (participant) => Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: _ParticipantCard(participant: participant),
+                          child: _ParticipantCard(
+                            participant: participant,
+                            onTap: () =>
+                                _showParticipantPreferenceModal(participant),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -255,8 +478,78 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         width: double.infinity,
                         height: 52,
                         child: ElevatedButton(
-                          onPressed: () {
-                            // TODO: 취향 입력 화면으로 이동
+                          onPressed: () async {
+                            final myParticipantKey = widget.participantId ?? 'me';
+                            final result = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => PreferenceInputScreen(
+                                  roomId: widget.roomId,
+                                  participantId: widget.participantId,
+                                  onSubmit: (chips, freeText) async {
+                                    await RoomApi().submitPreference(
+                                      roomId: widget.roomId,
+                                      participantId: widget.participantId,
+                                      accessToken: widget.accessToken,
+                                      chips: chips,
+                                      freeText: freeText,
+                                    );
+                                  },
+                                  initialSelectedTags: List<String>.from(
+                                    _chipsByParticipantId[myParticipantKey] ??
+                                        const <String>[],
+                                  ),
+                                  initialFreeText:
+                                      _freeTextByParticipantId[myParticipantKey] ??
+                                          '',
+                                ),
+                              ),
+                            );
+                            if (result is Map<String, dynamic> &&
+                                result['formattedPreference'] is String &&
+                                mounted) {
+                              final id = widget.participantId ?? 'me';
+                              final chips = result['chips'] is List
+                                  ? (result['chips'] as List)
+                                      .map((item) => item.toString())
+                                      .toList()
+                                  : <String>[];
+                              final freeText = result['freeText'] is String
+                                  ? result['freeText'] as String
+                                  : '';
+                              final currentList = _buildParticipantList();
+                              setState(() {
+                                final nextPreference =
+                                    result['formattedPreference'] as String;
+
+                                _preferenceByParticipantId[id] =
+                                    nextPreference;
+                                if (id != 'me') {
+                                  _preferenceByParticipantId['me'] = nextPreference;
+                                }
+                                _chipsByParticipantId[id] = chips;
+                                _freeTextByParticipantId[id] = freeText;
+                                _participants = currentList
+                                    .map(
+                                      (p) => p.participantId == id
+                                          ? RoomParticipant(
+                                              participantId: p.participantId,
+                                              name: p.name,
+                                              status: ParticipantStatus.completed,
+                                              isMe: p.isMe,
+                                            )
+                                          : (p.isMe && id == 'me')
+                                              ? RoomParticipant(
+                                                  participantId: p.participantId,
+                                                  name: p.name,
+                                                  status: ParticipantStatus.completed,
+                                                  isMe: p.isMe,
+                                                )
+                                          : p,
+                                    )
+                                    .toList();
+                              });
+                            }
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primaryMain,
@@ -277,11 +570,30 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         width: double.infinity,
                         height: 52,
                         child: OutlinedButton(
-                          onPressed: null,
+                          onPressed: _isHost
+                              ? ((_latestRecommendation != null || allCompleted)
+                                  ? () =>
+                                      _handleRecommendationButtonTap(
+                                        participantList,
+                                        canOpenCachedRecommendation,
+                                      )
+                                  : null)
+                              : () => _handleRecommendationButtonTap(
+                                    participantList,
+                                    canOpenCachedRecommendation,
+                                  ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.textSecondary,
-                            side: const BorderSide(
-                              color: AppColors.border,
+                            foregroundColor: _isHost
+                                ? ((_latestRecommendation != null || allCompleted)
+                                    ? AppColors.primaryMain
+                                    : AppColors.textSecondary)
+                                : AppColors.primaryMain,
+                            side: BorderSide(
+                              color: _isHost
+                                  ? ((_latestRecommendation != null || allCompleted)
+                                      ? AppColors.primaryMain
+                                      : AppColors.border)
+                                  : AppColors.primaryMain,
                               width: 1,
                             ),
                             shape: RoundedRectangleBorder(
@@ -289,9 +601,17 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                             ),
                           ),
                           child: Text(
-                            '모두 입력 완료 시 추천 시작',
+                            _recommendationButtonLabel(
+                              allCompleted: allCompleted,
+                              canOpenCachedRecommendation:
+                                  canOpenCachedRecommendation,
+                            ),
                             style: AppTextStyles.bodyM.copyWith(
-                              color: AppColors.textSecondary,
+                              color: _isHost
+                                  ? ((_latestRecommendation != null || allCompleted)
+                                      ? AppColors.primaryMain
+                                      : AppColors.textSecondary)
+                                  : AppColors.primaryMain,
                             ),
                           ),
                         ),
@@ -303,6 +623,94 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showParticipantPreferenceModal(RoomParticipant participant) {
+    final preferenceText = _findParticipantPreference(participant);
+    final hasPreference = preferenceText != null && preferenceText.trim().isNotEmpty;
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      '${participant.name} 취향',
+                      style: AppTextStyles.headingM.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.backgroundTint,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border, width: 1),
+                  ),
+                  child: Text(
+                    hasPreference
+                        ? preferenceText
+                        : participant.status == ParticipantStatus.completed
+                            ? '입력 완료 상태입니다.\n서버 연동 후 상세 취향을 불러올 수 있어요.'
+                            : '아직 취향을 입력하지 않았어요.',
+                    style: AppTextStyles.bodyM.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryMain,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: Text('닫기', style: AppTextStyles.buttonText),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openAiResultScreen(MenuRecommendationResponse response) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AiResultScreen(
+          recommendation: response,
         ),
       ),
     );
@@ -406,9 +814,11 @@ class _SectionTitle extends StatelessWidget {
 
 class _ParticipantCard extends StatelessWidget {
   final RoomParticipant participant;
+  final VoidCallback onTap;
 
   const _ParticipantCard({
     required this.participant,
+    required this.onTap,
   });
 
   @override
@@ -417,63 +827,70 @@ class _ParticipantCard extends StatelessWidget {
         ? AppColors.success
         : AppColors.textSecondary;
     final statusBackground = participant.status == ParticipantStatus.completed
-        ? AppColors.success.withOpacity(0.12)
+        ? AppColors.success.withValues(alpha: 0.12)
         : AppColors.surface;
     final statusText =
         participant.status == ParticipantStatus.completed ? '입력 완료' : '입력 중';
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.border,
-          width: 1,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: AppColors.border,
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: participant.isMe
+                    ? AppColors.primaryMain.withValues(alpha: 0.15)
+                    : AppColors.surface,
+                child: Text(
+                  participant.name.isNotEmpty ? participant.name[0] : '?',
+                  style: AppTextStyles.bodyM.copyWith(
+                    color: participant.isMe
+                        ? AppColors.primaryMain
+                        : AppColors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  participant.name,
+                  style: AppTextStyles.bodyM.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: statusBackground,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  statusText,
+                  style: AppTextStyles.caption.copyWith(
+                    color: statusColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: participant.isMe
-                ? AppColors.primaryMain.withOpacity(0.15)
-                : AppColors.surface,
-            child: Text(
-              participant.name.isNotEmpty ? participant.name[0] : '?',
-              style: AppTextStyles.bodyM.copyWith(
-                color: participant.isMe
-                    ? AppColors.primaryMain
-                    : AppColors.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              participant.name,
-              style: AppTextStyles.bodyM.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: statusBackground,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              statusText,
-              style: AppTextStyles.caption.copyWith(
-                color: statusColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -4,6 +4,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../auth/kakao_login_screen.dart';
 import '../auth/join_room_screen.dart';
+import '../preference/preference_input_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -147,7 +148,12 @@ class HomeScreen extends StatelessWidget {
                   description: '빠르게 추천받기',
                   isPrimary: false,
                   onTap: () {
-                    // TODO: 취향 입력 화면으로 이동
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const PreferenceInputScreen(),
+                      ),
+                    );
                   },
                 ),
               ],
