@@ -13,6 +13,8 @@ class PreferenceInputScreen extends StatefulWidget {
   final String? roomToken;
   final String? participantId;
   final PreferenceSubmitHandler? onSubmit;
+  final List<String> initialSelectedTags;
+  final String initialFreeText;
 
   const PreferenceInputScreen({
     super.key,
@@ -20,6 +22,8 @@ class PreferenceInputScreen extends StatefulWidget {
     this.roomToken,
     this.participantId,
     this.onSubmit,
+    this.initialSelectedTags = const <String>[],
+    this.initialFreeText = '',
   });
 
   @override
@@ -78,6 +82,13 @@ class _PreferenceInputScreenState extends State<PreferenceInputScreen> {
   bool _isSubmitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    _selectedTags.addAll(widget.initialSelectedTags);
+    _freeTextController.text = widget.initialFreeText;
+  }
+
+  @override
   void dispose() {
     _freeTextController.dispose();
     super.dispose();
@@ -85,12 +96,16 @@ class _PreferenceInputScreenState extends State<PreferenceInputScreen> {
 
   void _toggleTag(String tag) {
     setState(() {
-      if (_selectedTags.contains(tag)) {
-        _selectedTags.remove(tag);
-      } else {
-        _selectedTags.add(tag);
-      }
+      _toggleTagValue(tag);
     });
+  }
+
+  void _toggleTagValue(String tag) {
+    if (_selectedTags.contains(tag)) {
+      _selectedTags.remove(tag);
+    } else {
+      _selectedTags.add(tag);
+    }
   }
 
   Future<void> _openMoreTagsSheet() async {
@@ -103,69 +118,79 @@ class _PreferenceInputScreenState extends State<PreferenceInputScreen> {
       ),
       builder: (context) {
         final maxSheetHeight = MediaQuery.of(context).size.height * 0.75;
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            child: SizedBox(
-              height: maxSheetHeight,
-              child: Column(
-                children: [
-                  Row(
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                child: SizedBox(
+                  height: maxSheetHeight,
+                  child: Column(
                     children: [
-                      Text(
-                        '태그 더보기',
-                        style: AppTextStyles.headingM,
+                      Row(
+                        children: [
+                          Text(
+                            '태그 더보기',
+                            style: AppTextStyles.headingM,
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
                       ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: _moreTagGroups.entries.map((entry) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 20),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      entry.key,
+                                      style: AppTextStyles.bodyM.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 10,
+                                      children: entry.value
+                                          .map(
+                                            (tag) => _TagChip(
+                                              label: tag,
+                                              isSelected:
+                                                  _selectedTags.contains(tag),
+                                              onTap: () {
+                                                setState(() {
+                                                  _toggleTagValue(tag);
+                                                });
+                                                setModalState(() {});
+                                              },
+                                            ),
+                                          )
+                                          .toList(),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: _moreTagGroups.entries.map((entry) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 20),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  entry.key,
-                                  style: AppTextStyles.bodyM.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                Wrap(
-                                  spacing: 10,
-                                  runSpacing: 10,
-                                  children: entry.value
-                                      .map(
-                                        (tag) => _TagChip(
-                                          label: tag,
-                                          isSelected:
-                                              _selectedTags.contains(tag),
-                                          onTap: () => _toggleTag(tag),
-                                        ),
-                                      )
-                                      .toList(),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
