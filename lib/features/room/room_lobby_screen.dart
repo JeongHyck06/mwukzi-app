@@ -5,8 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import '../ai_result/ai_result_screen.dart';
 import '../preference/preference_input_screen.dart';
+import 'models/menu_recommendation_response.dart';
 import 'room_api.dart';
+import 'room_ai_api.dart';
 import 'room_sse_client.dart';
 import 'models/room_participant_response.dart';
 
@@ -53,7 +56,10 @@ class RoomLobbyScreen extends StatefulWidget {
 class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   bool _isLeaving = false;
   bool _isConnecting = false;
+  bool _isRecommending = false;
   List<RoomParticipant> _participants = [];
+  MenuRecommendationResponse? _latestRecommendation;
+  String? _latestRecommendationSignature;
   final Map<String, String> _preferenceByParticipantId = {};
   final Map<String, List<String>> _chipsByParticipantId = {};
   final Map<String, String> _freeTextByParticipantId = {};
@@ -68,6 +74,33 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
       return id;
     }
     return participant.isMe ? 'me' : 'name:${participant.name}';
+  }
+
+  String _resolveParticipantPreference(RoomParticipant participant) {
+    final preference = _findParticipantPreference(participant);
+    if (preference != null && preference.trim().isNotEmpty) {
+      return preference;
+    }
+    return '${participant.name}님은 취향 입력을 완료했습니다.';
+  }
+
+  String? _findParticipantPreference(RoomParticipant participant) {
+    final keys = <String>{
+      _participantKey(participant),
+    };
+    if (participant.isMe) {
+      keys.add('me');
+      if (widget.participantId != null && widget.participantId!.isNotEmpty) {
+        keys.add(widget.participantId!);
+      }
+    }
+    for (final key in keys) {
+      final value = _preferenceByParticipantId[key];
+      if (value != null && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return null;
   }
 
   List<RoomParticipant> _buildParticipantList() {
@@ -94,6 +127,101 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     return participantList.every(
       (participant) => participant.status == ParticipantStatus.completed,
     );
+  }
+
+  List<Map<String, String>> _buildRecommendationParticipants(
+    List<RoomParticipant> participantList,
+  ) {
+    return participantList.map((participant) {
+      return {
+        'name': participant.name,
+        'preference': _resolveParticipantPreference(participant),
+      };
+    }).toList();
+  }
+
+  String _buildRecommendationSignature(
+    List<Map<String, String>> participants,
+  ) {
+    final normalized = participants
+        .map((p) => '${p['name']}:${p['preference']}')
+        .toList()
+      ..sort();
+    return normalized.join('|');
+  }
+
+  Future<void> _startRecommendation(List<RoomParticipant> participantList) async {
+    if (_isRecommending) {
+      return;
+    }
+
+    setState(() {
+      _isRecommending = true;
+    });
+
+    try {
+      final participants = _buildRecommendationParticipants(participantList);
+      final signature = _buildRecommendationSignature(participants);
+      final response = await RoomAiApi().recommendMenu(
+        roomId: widget.roomId,
+        participants: participants,
+        count: 5,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _latestRecommendation = response;
+        _latestRecommendationSignature = signature;
+      });
+      _openAiResultScreen(response);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('추천 시작에 실패했습니다: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRecommending = false;
+        });
+      }
+    }
+  }
+
+  String _recommendationButtonLabel({
+    required bool allCompleted,
+    required bool canOpenCachedRecommendation,
+  }) {
+    if (_latestRecommendation != null && canOpenCachedRecommendation) {
+      return '추천 목록 조회하기';
+    }
+    if (_latestRecommendation != null && !canOpenCachedRecommendation) {
+      return '다시 추천 받기';
+    }
+    if (_isRecommending) {
+      return '추천 생성 중...';
+    }
+    if (!allCompleted) {
+      return '모두 입력 완료 시 추천 시작';
+    }
+    return '추천 시작';
+  }
+
+  Future<void> _handleRecommendationButtonTap(
+    List<RoomParticipant> participantList,
+    bool canOpenCachedRecommendation,
+  ) async {
+    if (_isRecommending) {
+      return;
+    }
+    if (_latestRecommendation != null && canOpenCachedRecommendation) {
+      _openAiResultScreen(_latestRecommendation!);
+      return;
+    }
+    await _startRecommendation(participantList);
   }
 
   @override
@@ -218,6 +346,12 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   Widget build(BuildContext context) {
     final participantList = _buildParticipantList();
     final allCompleted = _areAllParticipantsCompleted(participantList);
+    final recommendationParticipants =
+        _buildRecommendationParticipants(participantList);
+    final currentRecommendationSignature =
+        _buildRecommendationSignature(recommendationParticipants);
+    final canOpenCachedRecommendation = _latestRecommendation != null &&
+        _latestRecommendationSignature == currentRecommendationSignature;
     return WillPopScope(
       onWillPop: () async {
         await _handleLeave();
@@ -300,6 +434,15 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                                 builder: (context) => PreferenceInputScreen(
                                   roomId: widget.roomId,
                                   participantId: widget.participantId,
+                                  onSubmit: (chips, freeText) async {
+                                    await RoomApi().submitPreference(
+                                      roomId: widget.roomId,
+                                      participantId: widget.participantId,
+                                      accessToken: widget.accessToken,
+                                      chips: chips,
+                                      freeText: freeText,
+                                    );
+                                  },
                                   initialSelectedTags: List<String>.from(
                                     _chipsByParticipantId[myParticipantKey] ??
                                         const <String>[],
@@ -324,8 +467,14 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                                   : '';
                               final currentList = _buildParticipantList();
                               setState(() {
-                                _preferenceByParticipantId[id] =
+                                final nextPreference =
                                     result['formattedPreference'] as String;
+
+                                _preferenceByParticipantId[id] =
+                                    nextPreference;
+                                if (id != 'me') {
+                                  _preferenceByParticipantId['me'] = nextPreference;
+                                }
                                 _chipsByParticipantId[id] = chips;
                                 _freeTextByParticipantId[id] = freeText;
                                 _participants = currentList
@@ -369,21 +518,20 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         width: double.infinity,
                         height: 52,
                         child: OutlinedButton(
-                          onPressed: allCompleted
-                              ? () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('추천 시작 준비 완료'),
-                                    ),
-                                  );
-                                }
+                          onPressed: (_latestRecommendation != null || allCompleted)
+                              ? () =>
+                                  _handleRecommendationButtonTap(
+                                    participantList,
+                                    canOpenCachedRecommendation,
+                                  )
                               : null,
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: allCompleted
+                            foregroundColor:
+                                (_latestRecommendation != null || allCompleted)
                                 ? AppColors.primaryMain
                                 : AppColors.textSecondary,
                             side: BorderSide(
-                              color: allCompleted
+                              color: (_latestRecommendation != null || allCompleted)
                                   ? AppColors.primaryMain
                                   : AppColors.border,
                               width: 1,
@@ -393,11 +541,13 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                             ),
                           ),
                           child: Text(
-                            allCompleted
-                                ? '추천 시작'
-                                : '모두 입력 완료 시 추천 시작',
+                            _recommendationButtonLabel(
+                              allCompleted: allCompleted,
+                              canOpenCachedRecommendation:
+                                  canOpenCachedRecommendation,
+                            ),
                             style: AppTextStyles.bodyM.copyWith(
-                              color: allCompleted
+                              color: (_latestRecommendation != null || allCompleted)
                                   ? AppColors.primaryMain
                                   : AppColors.textSecondary,
                             ),
@@ -417,8 +567,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   }
 
   void _showParticipantPreferenceModal(RoomParticipant participant) {
-    final participantKey = _participantKey(participant);
-    final preferenceText = _preferenceByParticipantId[participantKey];
+    final preferenceText = _findParticipantPreference(participant);
     final hasPreference = preferenceText != null && preferenceText.trim().isNotEmpty;
 
     showModalBottomSheet<void>(
@@ -491,6 +640,17 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
           ),
         );
       },
+    );
+  }
+
+  void _openAiResultScreen(MenuRecommendationResponse response) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AiResultScreen(
+          recommendation: response,
+        ),
+      ),
     );
   }
 }

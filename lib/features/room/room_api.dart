@@ -127,4 +127,39 @@ class RoomApi {
       '방장 참여 실패 (${response.statusCode}): ${response.body}',
     );
   }
+
+  Future<RoomParticipantResponse> submitPreference({
+    required String roomId,
+    String? participantId,
+    String? accessToken,
+    List<String> chips = const [],
+    String freeText = '',
+  }) async {
+    final uri = ApiConfig.buildUri('/api/v1/rooms/$roomId/preferences/submit');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    if (accessToken != null && accessToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $accessToken';
+    }
+
+    final response = await http.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({
+        'participant_id': participantId,
+        'chips': chips,
+        'free_text': freeText,
+      }),
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return RoomParticipantResponse.fromJson(data);
+    }
+
+    throw Exception(
+      '취향 제출 실패 (${response.statusCode}): ${response.body}',
+    );
+  }
 }
