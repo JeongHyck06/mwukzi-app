@@ -154,6 +154,12 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     if (_isRecommending) {
       return;
     }
+    if (!_isHost || widget.accessToken == null || widget.accessToken!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('방장만 추천을 시작할 수 있어요')),
+      );
+      return;
+    }
 
     setState(() {
       _isRecommending = true;
@@ -165,6 +171,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
       final response = await RoomAiApi().recommendMenu(
         roomId: widget.roomId,
         participants: participants,
+        accessToken: widget.accessToken!,
         count: 5,
       );
       if (!mounted) {
@@ -195,14 +202,17 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     required bool allCompleted,
     required bool canOpenCachedRecommendation,
   }) {
+    if (_isRecommending) {
+      return _isHost ? '추천 생성 중...' : '추천 조회 중...';
+    }
+    if (!_isHost) {
+      return '추천 목록 조회하기';
+    }
     if (_latestRecommendation != null && canOpenCachedRecommendation) {
       return '추천 목록 조회하기';
     }
     if (_latestRecommendation != null && !canOpenCachedRecommendation) {
       return '다시 추천 받기';
-    }
-    if (_isRecommending) {
-      return '추천 생성 중...';
     }
     if (!allCompleted) {
       return '모두 입력 완료 시 추천 시작';
@@ -219,6 +229,37 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     }
     if (_latestRecommendation != null && canOpenCachedRecommendation) {
       _openAiResultScreen(_latestRecommendation!);
+      return;
+    }
+    if (!_isHost) {
+      setState(() {
+        _isRecommending = true;
+      });
+      try {
+        final latest = await RoomAiApi().getLatestRecommendation(
+          roomId: widget.roomId,
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _latestRecommendation = latest;
+        });
+        _openAiResultScreen(latest);
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('아직 방장이 추천을 시작하지 않았어요')),
+        );
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isRecommending = false;
+          });
+        }
+      }
       return;
     }
     await _startRecommendation(participantList);
@@ -254,6 +295,17 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                 item as Map<String, dynamic>))
             .toList();
         _updateParticipants(response);
+      } else if (decoded is Map<String, dynamic>) {
+        try {
+          final recommendation = MenuRecommendationResponse.fromJson(decoded);
+          if (mounted) {
+            setState(() {
+              _latestRecommendation = recommendation;
+            });
+          }
+        } catch (_) {
+          // participants 이벤트 외 데이터는 파싱 실패 시 무시
+        }
       }
     }, onError: (error) {
       if (mounted) {
@@ -351,7 +403,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     final currentRecommendationSignature =
         _buildRecommendationSignature(recommendationParticipants);
     final canOpenCachedRecommendation = _latestRecommendation != null &&
-        _latestRecommendationSignature == currentRecommendationSignature;
+        (!_isHost || _latestRecommendationSignature == currentRecommendationSignature);
     return WillPopScope(
       onWillPop: () async {
         await _handleLeave();
@@ -518,22 +570,30 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         width: double.infinity,
                         height: 52,
                         child: OutlinedButton(
-                          onPressed: (_latestRecommendation != null || allCompleted)
-                              ? () =>
-                                  _handleRecommendationButtonTap(
+                          onPressed: _isHost
+                              ? ((_latestRecommendation != null || allCompleted)
+                                  ? () =>
+                                      _handleRecommendationButtonTap(
+                                        participantList,
+                                        canOpenCachedRecommendation,
+                                      )
+                                  : null)
+                              : () => _handleRecommendationButtonTap(
                                     participantList,
                                     canOpenCachedRecommendation,
-                                  )
-                              : null,
+                                  ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor:
-                                (_latestRecommendation != null || allCompleted)
-                                ? AppColors.primaryMain
-                                : AppColors.textSecondary,
+                            foregroundColor: _isHost
+                                ? ((_latestRecommendation != null || allCompleted)
+                                    ? AppColors.primaryMain
+                                    : AppColors.textSecondary)
+                                : AppColors.primaryMain,
                             side: BorderSide(
-                              color: (_latestRecommendation != null || allCompleted)
-                                  ? AppColors.primaryMain
-                                  : AppColors.border,
+                              color: _isHost
+                                  ? ((_latestRecommendation != null || allCompleted)
+                                      ? AppColors.primaryMain
+                                      : AppColors.border)
+                                  : AppColors.primaryMain,
                               width: 1,
                             ),
                             shape: RoundedRectangleBorder(
@@ -547,9 +607,11 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                                   canOpenCachedRecommendation,
                             ),
                             style: AppTextStyles.bodyM.copyWith(
-                              color: (_latestRecommendation != null || allCompleted)
-                                  ? AppColors.primaryMain
-                                  : AppColors.textSecondary,
+                              color: _isHost
+                                  ? ((_latestRecommendation != null || allCompleted)
+                                      ? AppColors.primaryMain
+                                      : AppColors.textSecondary)
+                                  : AppColors.primaryMain,
                             ),
                           ),
                         ),
