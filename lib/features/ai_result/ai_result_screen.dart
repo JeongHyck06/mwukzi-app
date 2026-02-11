@@ -6,9 +6,14 @@ import '../map_list/map_list_screen.dart';
 import '../room/models/menu_recommendation_response.dart';
 
 class AiResultScreen extends StatelessWidget {
+  final String roomId;
   final MenuRecommendationResponse recommendation;
 
-  const AiResultScreen({super.key, required this.recommendation});
+  const AiResultScreen({
+    super.key,
+    required this.roomId,
+    required this.recommendation,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -105,6 +110,7 @@ class AiResultScreen extends StatelessWidget {
                             MaterialPageRoute(
                               builder:
                                   (context) => MapListScreen(
+                                    roomId: roomId,
                                     recommendation: recommendation,
                                   ),
                             ),

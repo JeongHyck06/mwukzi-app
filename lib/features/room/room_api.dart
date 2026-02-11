@@ -16,6 +16,9 @@ class RoomApi {
 
   Future<CreateRoomResponse> createRoom({
     required String accessToken,
+    double? centerLat,
+    double? centerLng,
+    int? radiusMeters,
   }) async {
     final uri = ApiConfig.buildUri('/api/v1/rooms');
     final response = await http.post(
@@ -24,7 +27,11 @@ class RoomApi {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $accessToken',
       },
-      body: jsonEncode({}),
+      body: jsonEncode({
+        'center_lat': centerLat,
+        'center_lng': centerLng,
+        'radius_meters': radiusMeters,
+      }),
     );
 
     if (response.statusCode >= 200 && response.statusCode < 300) {

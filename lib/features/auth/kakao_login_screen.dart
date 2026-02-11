@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import '../../core/constants/app_colors.dart';
@@ -17,6 +18,95 @@ class KakaoLoginScreen extends StatefulWidget {
 
 class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
   bool _isAutoLogin = false;
+  bool _isCheckingLocation = false;
+  String _locationStatusText = '위치 상태를 확인하는 중입니다...';
+  String _locationCoordsText = '-';
+
+  Future<_HostPositionResult> _resolveHostPosition() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        return const _HostPositionResult(
+          errorCode: _HostPositionErrorCode.serviceDisabled,
+        );
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever) {
+        return const _HostPositionResult(
+          errorCode: _HostPositionErrorCode.deniedForever,
+        );
+      }
+      if (permission == LocationPermission.denied) {
+        return const _HostPositionResult(
+          errorCode: _HostPositionErrorCode.denied,
+        );
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      return _HostPositionResult(position: position);
+    } catch (_) {
+      try {
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          return _HostPositionResult(position: lastKnown);
+        }
+        return const _HostPositionResult(
+          errorCode: _HostPositionErrorCode.unavailable,
+        );
+      } catch (_) {
+        return const _HostPositionResult(
+          errorCode: _HostPositionErrorCode.unavailable,
+        );
+      }
+    }
+  }
+
+  Future<void> _showLocationGuide(_HostPositionErrorCode? errorCode) async {
+    if (!mounted) {
+      return;
+    }
+    String message = '방 생성에는 위치 권한이 필요합니다.';
+    String actionLabel = '설정 열기';
+    Future<bool> Function() action = Geolocator.openAppSettings;
+
+    switch (errorCode) {
+      case _HostPositionErrorCode.serviceDisabled:
+        message = '위치 서비스가 꺼져 있어요. 위치 서비스를 켜주세요.';
+        actionLabel = '위치 서비스 열기';
+        action = Geolocator.openLocationSettings;
+        break;
+      case _HostPositionErrorCode.denied:
+        message = '위치 권한이 거부되었습니다. 권한을 허용해 주세요.';
+        break;
+      case _HostPositionErrorCode.deniedForever:
+        message = '위치 권한이 항상 거부 상태입니다. 설정에서 권한을 허용해 주세요.';
+        break;
+      case _HostPositionErrorCode.unavailable:
+      case null:
+        message = '위치를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.';
+        break;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: SnackBarAction(
+          label: actionLabel,
+          onPressed: () {
+            action();
+          },
+        ),
+      ),
+    );
+  }
 
   Future<OAuthToken?> _getKakaoToken({bool useCachedToken = true}) async {
     if (useCachedToken) {
@@ -57,7 +147,73 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
   @override
   void initState() {
     super.initState();
+    _refreshLocationDebugInfo();
     _tryAutoLogin();
+  }
+
+  Future<void> _refreshLocationDebugInfo() async {
+    if (mounted) {
+      setState(() {
+        _isCheckingLocation = true;
+      });
+    }
+
+    String statusText = '';
+    String coordsText = '-';
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      final permission = await Geolocator.checkPermission();
+
+      statusText =
+          '서비스: ${serviceEnabled ? 'ON' : 'OFF'} / 권한: ${_permissionLabel(permission)}';
+
+      Position? position;
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.medium,
+          ),
+        );
+      } else {
+        position = await Geolocator.getLastKnownPosition();
+      }
+
+      if (position != null) {
+        coordsText =
+            'lat: ${position.latitude.toStringAsFixed(6)}, lng: ${position.longitude.toStringAsFixed(6)}';
+      } else {
+        coordsText = '좌표 없음';
+      }
+    } catch (e) {
+      statusText = '위치 확인 실패';
+      coordsText = e.toString().replaceFirst('Exception: ', '');
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _locationStatusText = statusText;
+      _locationCoordsText = coordsText;
+      _isCheckingLocation = false;
+    });
+  }
+
+  String _permissionLabel(LocationPermission permission) {
+    switch (permission) {
+      case LocationPermission.always:
+        return 'always';
+      case LocationPermission.whileInUse:
+        return 'whileInUse';
+      case LocationPermission.denied:
+        return 'denied';
+      case LocationPermission.deniedForever:
+        return 'deniedForever';
+      case LocationPermission.unableToDetermine:
+        return 'unableToDetermine';
+    }
   }
 
   Future<void> _tryAutoLogin() async {
@@ -100,8 +256,19 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
       }
       print('백엔드 로그인 성공: ${loginResponse.user.nickname}');
 
+      final hostPositionResult = await _resolveHostPosition();
+      final hostPosition = hostPositionResult.position;
+      if (hostPosition == null) {
+        if (!silent) {
+          await _showLocationGuide(hostPositionResult.errorCode);
+        }
+        return;
+      }
       final roomResponse = await RoomApi().createRoom(
         accessToken: loginResponse.accessToken,
+        centerLat: hostPosition.latitude,
+        centerLng: hostPosition.longitude,
+        radiusMeters: 1500,
       );
       await RoomApi().joinAsHost(
         roomId: roomResponse.roomId,
@@ -278,6 +445,72 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
 
                       const SizedBox(height: 32),
 
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: AppColors.border,
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '위치 확인',
+                              style: AppTextStyles.caption.copyWith(
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _locationStatusText,
+                              style: AppTextStyles.caption.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _locationCoordsText,
+                              style: AppTextStyles.caption.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 40,
+                              child: OutlinedButton(
+                                onPressed: _isCheckingLocation
+                                    ? null
+                                    : _refreshLocationDebugInfo,
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(color: AppColors.border),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: Text(
+                                  _isCheckingLocation ? '확인 중...' : '현재 위치 다시 확인',
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
                       // Note Card
                       Container(
                         width: double.infinity,
@@ -323,4 +556,18 @@ class _KakaoLoginScreenState extends State<KakaoLoginScreen> {
       ),
     );
   }
+}
+
+class _HostPositionResult {
+  final Position? position;
+  final _HostPositionErrorCode? errorCode;
+
+  const _HostPositionResult({this.position, this.errorCode});
+}
+
+enum _HostPositionErrorCode {
+  serviceDisabled,
+  denied,
+  deniedForever,
+  unavailable,
 }

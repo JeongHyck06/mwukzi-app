@@ -1,16 +1,14 @@
 PODS:
   - Flutter (1.0.0)
-  - flutter_naver_map (1.4.2):
-    - Flutter
-    - NMapsMap (= 3.23.0)
   - geolocator_apple (1.2.0):
     - Flutter
     - FlutterMacOS
   - kakao_flutter_sdk_common (1.10.0):
     - Flutter
-  - NMapsGeometry (1.0.2)
-  - NMapsMap (3.23.0):
-    - NMapsGeometry
+  - kakao_map_sdk (1.2.3):
+    - Flutter
+    - KakaoMapsSDK (= 2.12.10)
+  - KakaoMapsSDK (2.12.10)
   - path_provider_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -20,26 +18,25 @@ PODS:
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
-  - flutter_naver_map (from `.symlinks/plugins/flutter_naver_map/ios`)
   - geolocator_apple (from `.symlinks/plugins/geolocator_apple/darwin`)
   - kakao_flutter_sdk_common (from `.symlinks/plugins/kakao_flutter_sdk_common/ios`)
+  - kakao_map_sdk (from `.symlinks/plugins/kakao_map_sdk/ios`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
 
 SPEC REPOS:
   trunk:
-    - NMapsGeometry
-    - NMapsMap
+    - KakaoMapsSDK
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
-  flutter_naver_map:
-    :path: ".symlinks/plugins/flutter_naver_map/ios"
   geolocator_apple:
     :path: ".symlinks/plugins/geolocator_apple/darwin"
   kakao_flutter_sdk_common:
     :path: ".symlinks/plugins/kakao_flutter_sdk_common/ios"
+  kakao_map_sdk:
+    :path: ".symlinks/plugins/kakao_map_sdk/ios"
   path_provider_foundation:
     :path: ".symlinks/plugins/path_provider_foundation/darwin"
   shared_preferences_foundation:
@@ -47,14 +44,13 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  flutter_naver_map: d9f447f1271059759d4d5e38c3b347d7ab2ba835
   geolocator_apple: ab36aa0e8b7d7a2d7639b3b4e48308394e8cef5e
   kakao_flutter_sdk_common: 682b3606698f87467788598dc2dc09d4e6867fbd
-  NMapsGeometry: 4e02554fa9880ef02ed96b075dc84355d6352479
-  NMapsMap: 1964e6f9073301ad3cbe3a12235ba36f6f6cd905
+  kakao_map_sdk: cbc70e71f9b6176e2ece211e920c5bca469bebff
+  KakaoMapsSDK: 32040e6268df2447c3f56dc4acada339d8eb8f32
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
   shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: 251cb053df7158f337c0712f2ab29f4e0fa474ce
 
 COCOAPODS: 1.16.2

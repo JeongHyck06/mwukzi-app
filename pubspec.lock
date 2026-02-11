@@ -150,14 +150,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.0.0"
-  flutter_naver_map:
-    dependency: "direct main"
-    description:
-      name: flutter_naver_map
-      sha256: "5d76331cc9f5c678adfda7089834b99d0377fd365e7c144da9784b876ceed36e"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.4.4"
   flutter_riverpod:
     dependency: "direct main"
     description:
@@ -304,6 +296,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.10.0"
+  kakao_map_sdk:
+    dependency: "direct main"
+    description:
+      name: kakao_map_sdk
+      sha256: efb9377151185d20e6ed5d342c0d6f5a5d8e6b035847a6937621ce1a5d530b52
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.3"
   leak_tracker:
     dependency: transitive
     description:
