@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../ai_result/ai_result_screen.dart';
@@ -268,7 +269,40 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   @override
   void initState() {
     super.initState();
+    _logLocationOnLobbyEnter();
     _connectSse();
+  }
+
+  Future<void> _logLocationOnLobbyEnter() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      final permission = await Geolocator.checkPermission();
+      Position? position;
+
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.medium,
+          ),
+        );
+      } else {
+        position = await Geolocator.getLastKnownPosition();
+      }
+
+      final coords = position == null
+          ? 'coords=none'
+          : 'lat=${position.latitude}, lng=${position.longitude}';
+
+      debugPrint(
+        '[RoomLobby][Location] roomId=${widget.roomId}, '
+        'serviceEnabled=$serviceEnabled, permission=$permission, $coords',
+      );
+    } catch (error) {
+      debugPrint(
+        '[RoomLobby][Location] roomId=${widget.roomId}, check_failed=$error',
+      );
+    }
   }
 
   @override
@@ -737,6 +771,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => AiResultScreen(
+          roomId: widget.roomId,
           recommendation: response,
         ),
       ),

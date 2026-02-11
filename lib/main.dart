@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
+import 'package:kakao_map_sdk/kakao_map_sdk.dart';
 import 'core/constants/kakao_config.dart';
 import 'features/home/home_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   // Kakao SDK 초기화
   KakaoSdk.init(nativeAppKey: KakaoConfig.nativeAppKey);
-  
-  runApp(
-    const ProviderScope(
-      child: MwukziApp(),
-    ),
-  );
+  await KakaoMapSdk.instance.initialize(KakaoConfig.nativeAppKey);
+
+  runApp(const ProviderScope(child: MwukziApp()));
 }
 
 class MwukziApp extends StatelessWidget {
