@@ -4,6 +4,7 @@ import 'package:kakao_map_sdk/kakao_map_sdk.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import 'models/place_detail_response.dart';
 import 'models/place_search_response.dart';
 import 'place_search_api.dart';
 import '../room/models/menu_recommendation_response.dart';
@@ -25,7 +26,9 @@ class MapListScreen extends StatefulWidget {
 class _MapListScreenState extends State<MapListScreen> {
   KakaoMapController? _mapController;
   final List<_RestaurantCardItem> _items = [];
+  final List<Poi> _pois = [];
   final PlaceSearchApi _placeSearchApi = PlaceSearchApi();
+  PoiStyle? _poiStyle;
 
   LatLng? _origin;
   String? _errorText;
@@ -140,6 +143,7 @@ class _MapListScreenState extends State<MapListScreen> {
       ),
       onMapReady: (controller) {
         _mapController = controller;
+        _syncPois();
       },
       onMapError: (error) {
         if (!mounted) {
@@ -177,6 +181,7 @@ class _MapListScreenState extends State<MapListScreen> {
         return InkWell(
           borderRadius: BorderRadius.circular(20),
           onTap: () => _toggleSelection(index),
+          onLongPress: () => _openPlaceDetail(item),
           child: Container(
             height: 100,
             width: double.infinity,
@@ -255,6 +260,7 @@ class _MapListScreenState extends State<MapListScreen> {
           ..addAll(items);
         _errorText = items.isEmpty ? '주변에서 검색된 식당이 없습니다.' : null;
       });
+      _syncPois();
     } catch (_) {
       if (!mounted) {
         return;
@@ -265,6 +271,7 @@ class _MapListScreenState extends State<MapListScreen> {
           ..addAll(_fallbackItems());
         _errorText = '식당 검색에 실패해 임시 목록을 표시합니다.';
       });
+      _syncPois();
     } finally {
       if (mounted) {
         setState(() {
@@ -325,6 +332,14 @@ class _MapListScreenState extends State<MapListScreen> {
                 : 'place_$index',
         name: place.name.isNotEmpty ? place.name : '이름 없는 식당',
         info: infoText,
+        providerPlaceId: place.providerPlaceId,
+        category: place.category,
+        address: place.address,
+        roadAddress: place.roadAddress,
+        phone: place.phone,
+        placeUrl: place.placeUrl,
+        sourceKeyword: place.sourceKeyword,
+        distanceMeters: place.distanceMeters,
         latitude: place.latitude,
         longitude: place.longitude,
         isSelected: index < 2,
@@ -357,12 +372,28 @@ class _MapListScreenState extends State<MapListScreen> {
         id: 'fallback_1',
         name: '가까운 음식점',
         info: '지도 재구현 중 • 임시 목록',
+        providerPlaceId: '',
+        category: '',
+        address: '',
+        roadAddress: '',
+        phone: '',
+        placeUrl: '',
+        sourceKeyword: '',
+        distanceMeters: null,
         isSelected: true,
       ),
       _RestaurantCardItem(
         id: 'fallback_2',
         name: '주변 식당',
         info: '지도 재구현 중 • 임시 목록',
+        providerPlaceId: '',
+        category: '',
+        address: '',
+        roadAddress: '',
+        phone: '',
+        placeUrl: '',
+        sourceKeyword: '',
+        distanceMeters: null,
         isSelected: false,
       ),
     ];
@@ -384,12 +415,254 @@ class _MapListScreenState extends State<MapListScreen> {
       );
     }
   }
+
+  Future<PoiStyle> _getPoiStyle() async {
+    if (_poiStyle != null) {
+      return _poiStyle!;
+    }
+    final icon = await KImage.fromWidget(
+      const Icon(Icons.location_on, color: AppColors.primaryMain, size: 34),
+      const Size(34, 34),
+      context: context,
+    );
+    _poiStyle = PoiStyle(icon: icon);
+    return _poiStyle!;
+  }
+
+  Future<void> _syncPois() async {
+    final controller = _mapController;
+    if (controller == null) {
+      return;
+    }
+
+    for (final poi in _pois) {
+      try {
+        await controller.labelLayer.removePoi(poi);
+      } catch (_) {
+        // ignore marker cleanup failure on transient map states
+      }
+    }
+    _pois.clear();
+
+    final style = await _getPoiStyle();
+    for (final item in _items) {
+      final lat = item.latitude;
+      final lng = item.longitude;
+      if (lat == null || lng == null) {
+        continue;
+      }
+      try {
+        final poi = await controller.labelLayer.addPoi(
+          LatLng(lat, lng),
+          style: style,
+          text: item.name,
+          onClick: () {
+            _openPlaceDetail(item);
+          },
+        );
+        _pois.add(poi);
+      } catch (_) {
+        // ignore individual marker creation failure
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _pois.clear();
+    super.dispose();
+  }
+
+  String _normalizeImageUrl(String url) {
+    final value = url.trim();
+    if (value.isEmpty) {
+      return '';
+    }
+    if (value.startsWith('//')) {
+      return 'https:$value';
+    }
+    if (value.startsWith('http://')) {
+      return 'https://${value.substring('http://'.length)}';
+    }
+    return value;
+  }
+
+  Future<void> _openPlaceDetail(_RestaurantCardItem item) async {
+    if (item.latitude == null || item.longitude == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('상세 조회를 위한 위치 정보가 없습니다.')));
+      return;
+    }
+    if (item.name.trim().isEmpty) {
+      return;
+    }
+
+    final detailFuture = _placeSearchApi.getPlaceDetail(
+      roomId: widget.roomId,
+      placeName: item.name,
+      providerPlaceId: item.providerPlaceId,
+      latitude: item.latitude,
+      longitude: item.longitude,
+    );
+    if (!mounted) {
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return FutureBuilder<PlaceDetailResponse>(
+          future: detailFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const SizedBox(
+                height: 220,
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: AppColors.primaryMain,
+                  ),
+                ),
+              );
+            }
+
+            if (snapshot.hasError || snapshot.data == null) {
+              return SizedBox(
+                height: 220,
+                child: Center(
+                  child: Text(
+                    '식당 상세 정보를 불러오지 못했습니다',
+                    style: AppTextStyles.bodyM.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            final detail = snapshot.data!;
+            final address =
+                detail.roadAddress.isNotEmpty
+                    ? detail.roadAddress
+                    : detail.address;
+            final effectiveDistance =
+                (detail.distanceMeters != null && detail.distanceMeters! > 0)
+                    ? detail.distanceMeters
+                    : ((item.distanceMeters != null && item.distanceMeters! > 0)
+                        ? item.distanceMeters
+                        : null);
+            final distanceText =
+                effectiveDistance == null
+                    ? '거리 정보 없음'
+                    : '${effectiveDistance}m';
+            final keywordText =
+                detail.sourceKeyword.isEmpty ? '-' : detail.sourceKeyword;
+            final phoneText = detail.phone.isEmpty ? '-' : detail.phone;
+            final categoryText =
+                detail.category.isEmpty ? '-' : detail.category;
+            final placeUrlText =
+                detail.placeUrl.isEmpty ? '-' : detail.placeUrl;
+
+            final imageCandidates = <String>[
+              ...detail.imageUrls,
+              if (detail.imageUrl.isNotEmpty) detail.imageUrl,
+            ];
+            final uniqueImageUrls =
+                imageCandidates
+                    .map(_normalizeImageUrl)
+                    .toSet()
+                    .where((url) => url.isNotEmpty)
+                    .toList();
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (uniqueImageUrls.isNotEmpty) ...[
+                    SizedBox(
+                      height: 180,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: uniqueImageUrls.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          final imageUrl = uniqueImageUrls[index];
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.network(
+                              imageUrl,
+                              width: 280,
+                              height: 180,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) {
+                                return Container(
+                                  width: 280,
+                                  height: 180,
+                                  color: AppColors.backgroundTint,
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    '이미지를 불러오지 못했습니다',
+                                    style: AppTextStyles.caption.copyWith(
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Text(
+                    detail.name,
+                    style: AppTextStyles.bodyM.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(label: '거리', value: distanceText),
+                  _DetailRow(label: '카테고리', value: categoryText),
+                  _DetailRow(label: '추천 키워드', value: keywordText),
+                  _DetailRow(
+                    label: '주소',
+                    value: address.isEmpty ? '-' : address,
+                  ),
+                  _DetailRow(label: '전화번호', value: phoneText),
+                  _DetailRow(label: '상세 링크', value: placeUrlText),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 class _RestaurantCardItem {
   final String id;
   final String name;
   final String info;
+  final String providerPlaceId;
+  final String category;
+  final String address;
+  final String roadAddress;
+  final String phone;
+  final String placeUrl;
+  final String sourceKeyword;
+  final int? distanceMeters;
   final double? latitude;
   final double? longitude;
   final bool isSelected;
@@ -398,6 +671,14 @@ class _RestaurantCardItem {
     required this.id,
     required this.name,
     required this.info,
+    required this.providerPlaceId,
+    required this.category,
+    required this.address,
+    required this.roadAddress,
+    required this.phone,
+    required this.placeUrl,
+    required this.sourceKeyword,
+    required this.distanceMeters,
     this.latitude,
     this.longitude,
     required this.isSelected,
@@ -408,9 +689,55 @@ class _RestaurantCardItem {
       id: id,
       name: name,
       info: info,
+      providerPlaceId: providerPlaceId,
+      category: category,
+      address: address,
+      roadAddress: roadAddress,
+      phone: phone,
+      placeUrl: placeUrl,
+      sourceKeyword: sourceKeyword,
+      distanceMeters: distanceMeters,
       latitude: latitude,
       longitude: longitude,
       isSelected: isSelected ?? this.isSelected,
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DetailRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 82,
+            child: Text(
+              label,
+              style: AppTextStyles.caption.copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: AppTextStyles.caption.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
