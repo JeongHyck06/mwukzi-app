@@ -8,11 +8,15 @@ import '../room/models/menu_recommendation_response.dart';
 class AiResultScreen extends StatelessWidget {
   final String roomId;
   final MenuRecommendationResponse recommendation;
+  final String? participantId;
+  final String? accessToken;
 
   const AiResultScreen({
     super.key,
     required this.roomId,
     required this.recommendation,
+    this.participantId,
+    this.accessToken,
   });
 
   @override
@@ -112,6 +116,8 @@ class AiResultScreen extends StatelessWidget {
                                   (context) => MapListScreen(
                                     roomId: roomId,
                                     recommendation: recommendation,
+                                    participantId: participantId,
+                                    accessToken: accessToken,
                                   ),
                             ),
                           );
