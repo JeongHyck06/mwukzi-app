@@ -86,9 +86,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   }
 
   String? _findParticipantPreference(RoomParticipant participant) {
-    final keys = <String>{
-      _participantKey(participant),
-    };
+    final keys = <String>{_participantKey(participant)};
     if (participant.isMe) {
       keys.add('me');
       if (widget.participantId != null && widget.participantId!.isNotEmpty) {
@@ -141,24 +139,23 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     }).toList();
   }
 
-  String _buildRecommendationSignature(
-    List<Map<String, String>> participants,
-  ) {
-    final normalized = participants
-        .map((p) => '${p['name']}:${p['preference']}')
-        .toList()
-      ..sort();
+  String _buildRecommendationSignature(List<Map<String, String>> participants) {
+    final normalized =
+        participants.map((p) => '${p['name']}:${p['preference']}').toList()
+          ..sort();
     return normalized.join('|');
   }
 
-  Future<void> _startRecommendation(List<RoomParticipant> participantList) async {
+  Future<void> _startRecommendation(
+    List<RoomParticipant> participantList,
+  ) async {
     if (_isRecommending) {
       return;
     }
     if (!_isHost || widget.accessToken == null || widget.accessToken!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('방장만 추천을 시작할 수 있어요')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('방장만 추천을 시작할 수 있어요')));
       return;
     }
 
@@ -187,9 +184,9 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('추천 시작에 실패했습니다: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('추천 시작에 실패했습니다: $error')));
     } finally {
       if (mounted) {
         setState(() {
@@ -251,9 +248,9 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
         if (!mounted) {
           return;
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('아직 방장이 추천을 시작하지 않았어요')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('아직 방장이 추천을 시작하지 않았어요')));
       } finally {
         if (mounted) {
           setState(() {
@@ -290,9 +287,10 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
         position = await Geolocator.getLastKnownPosition();
       }
 
-      final coords = position == null
-          ? 'coords=none'
-          : 'lat=${position.latitude}, lng=${position.longitude}';
+      final coords =
+          position == null
+              ? 'coords=none'
+              : 'lat=${position.latitude}, lng=${position.longitude}';
 
       debugPrint(
         '[RoomLobby][Location] roomId=${widget.roomId}, '
@@ -318,57 +316,67 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     });
     final url = RoomApi().buildSseUrl(inviteCode: widget.inviteCode);
     _sseClient = createRoomSseClient(url);
-    _sseSubscription = _sseClient!.messages.listen((data) {
-      if (data.trim().isEmpty) {
-        return;
-      }
-      final decoded = jsonDecode(data);
-      if (decoded is List) {
-        final response = decoded
-            .map((item) => RoomParticipantResponse.fromJson(
-                item as Map<String, dynamic>))
-            .toList();
-        _updateParticipants(response);
-      } else if (decoded is Map<String, dynamic>) {
-        try {
-          final recommendation = MenuRecommendationResponse.fromJson(decoded);
-          if (mounted) {
-            setState(() {
-              _latestRecommendation = recommendation;
-            });
-          }
-        } catch (_) {
-          // participants 이벤트 외 데이터는 파싱 실패 시 무시
+    _sseSubscription = _sseClient!.messages.listen(
+      (data) {
+        if (data.trim().isEmpty) {
+          return;
         }
-      }
-    }, onError: (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('실시간 연결 오류: $error')),
-        );
-      }
-    }, onDone: () {
-      if (mounted) {
-        setState(() {
-          _isConnecting = false;
-        });
-      }
-    });
+        final decoded = jsonDecode(data);
+        if (decoded is List) {
+          final response =
+              decoded
+                  .map(
+                    (item) => RoomParticipantResponse.fromJson(
+                      item as Map<String, dynamic>,
+                    ),
+                  )
+                  .toList();
+          _updateParticipants(response);
+        } else if (decoded is Map<String, dynamic>) {
+          try {
+            final recommendation = MenuRecommendationResponse.fromJson(decoded);
+            if (mounted) {
+              setState(() {
+                _latestRecommendation = recommendation;
+              });
+            }
+          } catch (_) {
+            // participants 이벤트 외 데이터는 파싱 실패 시 무시
+          }
+        }
+      },
+      onError: (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('실시간 연결 오류: $error')));
+        }
+      },
+      onDone: () {
+        if (mounted) {
+          setState(() {
+            _isConnecting = false;
+          });
+        }
+      },
+    );
   }
 
   void _updateParticipants(List<RoomParticipantResponse> response) {
-    final mapped = response
-        .map(
-          (participant) => RoomParticipant(
-            participantId: participant.participantId,
-            name: participant.displayName,
-            status: participant.hasSubmitted
-                ? ParticipantStatus.completed
-                : ParticipantStatus.inProgress,
-            isMe: participant.displayName == widget.displayName,
-          ),
-        )
-        .toList();
+    final mapped =
+        response
+            .map(
+              (participant) => RoomParticipant(
+                participantId: participant.participantId,
+                name: participant.displayName,
+                status:
+                    participant.hasSubmitted
+                        ? ParticipantStatus.completed
+                        : ParticipantStatus.inProgress,
+                isMe: participant.displayName == widget.displayName,
+              ),
+            )
+            .toList();
 
     final hasMe = mapped.any((item) => item.isMe);
     if (!hasMe && widget.displayName.isNotEmpty) {
@@ -404,15 +412,13 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
           accessToken: widget.accessToken!,
         );
       } else if (widget.participantId != null) {
-        await RoomApi().leaveRoomAsGuest(
-          participantId: widget.participantId!,
-        );
+        await RoomApi().leaveRoomAsGuest(participantId: widget.participantId!);
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('방 나가기에 실패했습니다: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('방 나가기에 실패했습니다: $error')));
       }
       return;
     } finally {
@@ -432,12 +438,16 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   Widget build(BuildContext context) {
     final participantList = _buildParticipantList();
     final allCompleted = _areAllParticipantsCompleted(participantList);
-    final recommendationParticipants =
-        _buildRecommendationParticipants(participantList);
-    final currentRecommendationSignature =
-        _buildRecommendationSignature(recommendationParticipants);
-    final canOpenCachedRecommendation = _latestRecommendation != null &&
-        (!_isHost || _latestRecommendationSignature == currentRecommendationSignature);
+    final recommendationParticipants = _buildRecommendationParticipants(
+      participantList,
+    );
+    final currentRecommendationSignature = _buildRecommendationSignature(
+      recommendationParticipants,
+    );
+    final canOpenCachedRecommendation =
+        _latestRecommendation != null &&
+        (!_isHost ||
+            _latestRecommendationSignature == currentRecommendationSignature);
     return WillPopScope(
       onWillPop: () async {
         await _handleLeave();
@@ -467,19 +477,14 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                       constraints: const BoxConstraints(),
                     ),
                     const SizedBox(width: 12),
-                    Text(
-                      '방 로비',
-                      style: AppTextStyles.headingM,
-                    ),
+                    Text('방 로비', style: AppTextStyles.headingM),
                     const Spacer(),
                     if (_isConnecting)
                       const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
-                      )
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
                   ],
                 ),
               ),
@@ -489,21 +494,19 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                   child: Column(
                     children: [
                       const SizedBox(height: 24),
-                      _InviteCodeCard(
-                        inviteCode: widget.inviteCode,
-                      ),
+                      _InviteCodeCard(inviteCode: widget.inviteCode),
                       const SizedBox(height: 20),
-                      _SectionTitle(
-                        title: '참여자 (${participantList.length}명)',
-                      ),
+                      _SectionTitle(title: '참여자 (${participantList.length}명)'),
                       const SizedBox(height: 12),
                       ...participantList.map(
                         (participant) => Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: _ParticipantCard(
                             participant: participant,
-                            onTap: () =>
-                                _showParticipantPreferenceModal(participant),
+                            onTap:
+                                () => _showParticipantPreferenceModal(
+                                  participant,
+                                ),
                           ),
                         ),
                       ),
@@ -513,75 +516,87 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         height: 52,
                         child: ElevatedButton(
                           onPressed: () async {
-                            final myParticipantKey = widget.participantId ?? 'me';
+                            final myParticipantKey =
+                                widget.participantId ?? 'me';
                             final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => PreferenceInputScreen(
-                                  roomId: widget.roomId,
-                                  participantId: widget.participantId,
-                                  onSubmit: (chips, freeText) async {
-                                    await RoomApi().submitPreference(
+                                builder:
+                                    (context) => PreferenceInputScreen(
                                       roomId: widget.roomId,
                                       participantId: widget.participantId,
-                                      accessToken: widget.accessToken,
-                                      chips: chips,
-                                      freeText: freeText,
-                                    );
-                                  },
-                                  initialSelectedTags: List<String>.from(
-                                    _chipsByParticipantId[myParticipantKey] ??
-                                        const <String>[],
-                                  ),
-                                  initialFreeText:
-                                      _freeTextByParticipantId[myParticipantKey] ??
+                                      onSubmit: (chips, freeText) async {
+                                        await RoomApi().submitPreference(
+                                          roomId: widget.roomId,
+                                          participantId: widget.participantId,
+                                          accessToken: widget.accessToken,
+                                          chips: chips,
+                                          freeText: freeText,
+                                        );
+                                      },
+                                      initialSelectedTags: List<String>.from(
+                                        _chipsByParticipantId[myParticipantKey] ??
+                                            const <String>[],
+                                      ),
+                                      initialFreeText:
+                                          _freeTextByParticipantId[myParticipantKey] ??
                                           '',
-                                ),
+                                    ),
                               ),
                             );
                             if (result is Map<String, dynamic> &&
                                 result['formattedPreference'] is String &&
                                 mounted) {
                               final id = widget.participantId ?? 'me';
-                              final chips = result['chips'] is List
-                                  ? (result['chips'] as List)
-                                      .map((item) => item.toString())
-                                      .toList()
-                                  : <String>[];
-                              final freeText = result['freeText'] is String
-                                  ? result['freeText'] as String
-                                  : '';
+                              final chips =
+                                  result['chips'] is List
+                                      ? (result['chips'] as List)
+                                          .map((item) => item.toString())
+                                          .toList()
+                                      : <String>[];
+                              final freeText =
+                                  result['freeText'] is String
+                                      ? result['freeText'] as String
+                                      : '';
                               final currentList = _buildParticipantList();
                               setState(() {
                                 final nextPreference =
                                     result['formattedPreference'] as String;
 
-                                _preferenceByParticipantId[id] =
-                                    nextPreference;
+                                _preferenceByParticipantId[id] = nextPreference;
                                 if (id != 'me') {
-                                  _preferenceByParticipantId['me'] = nextPreference;
+                                  _preferenceByParticipantId['me'] =
+                                      nextPreference;
                                 }
                                 _chipsByParticipantId[id] = chips;
                                 _freeTextByParticipantId[id] = freeText;
-                                _participants = currentList
-                                    .map(
-                                      (p) => p.participantId == id
-                                          ? RoomParticipant(
-                                              participantId: p.participantId,
-                                              name: p.name,
-                                              status: ParticipantStatus.completed,
-                                              isMe: p.isMe,
-                                            )
-                                          : (p.isMe && id == 'me')
-                                              ? RoomParticipant(
-                                                  participantId: p.participantId,
-                                                  name: p.name,
-                                                  status: ParticipantStatus.completed,
-                                                  isMe: p.isMe,
-                                                )
-                                          : p,
-                                    )
-                                    .toList();
+                                _participants =
+                                    currentList
+                                        .map(
+                                          (p) =>
+                                              p.participantId == id
+                                                  ? RoomParticipant(
+                                                    participantId:
+                                                        p.participantId,
+                                                    name: p.name,
+                                                    status:
+                                                        ParticipantStatus
+                                                            .completed,
+                                                    isMe: p.isMe,
+                                                  )
+                                                  : (p.isMe && id == 'me')
+                                                  ? RoomParticipant(
+                                                    participantId:
+                                                        p.participantId,
+                                                    name: p.name,
+                                                    status:
+                                                        ParticipantStatus
+                                                            .completed,
+                                                    isMe: p.isMe,
+                                                  )
+                                                  : p,
+                                        )
+                                        .toList();
                               });
                             }
                           },
@@ -604,30 +619,35 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         width: double.infinity,
                         height: 52,
                         child: OutlinedButton(
-                          onPressed: _isHost
-                              ? ((_latestRecommendation != null || allCompleted)
-                                  ? () =>
-                                      _handleRecommendationButtonTap(
+                          onPressed:
+                              _isHost
+                                  ? ((_latestRecommendation != null ||
+                                          allCompleted)
+                                      ? () => _handleRecommendationButtonTap(
                                         participantList,
                                         canOpenCachedRecommendation,
                                       )
-                                  : null)
-                              : () => _handleRecommendationButtonTap(
+                                      : null)
+                                  : () => _handleRecommendationButtonTap(
                                     participantList,
                                     canOpenCachedRecommendation,
                                   ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: _isHost
-                                ? ((_latestRecommendation != null || allCompleted)
-                                    ? AppColors.primaryMain
-                                    : AppColors.textSecondary)
-                                : AppColors.primaryMain,
+                            foregroundColor:
+                                _isHost
+                                    ? ((_latestRecommendation != null ||
+                                            allCompleted)
+                                        ? AppColors.primaryMain
+                                        : AppColors.textSecondary)
+                                    : AppColors.primaryMain,
                             side: BorderSide(
-                              color: _isHost
-                                  ? ((_latestRecommendation != null || allCompleted)
-                                      ? AppColors.primaryMain
-                                      : AppColors.border)
-                                  : AppColors.primaryMain,
+                              color:
+                                  _isHost
+                                      ? ((_latestRecommendation != null ||
+                                              allCompleted)
+                                          ? AppColors.primaryMain
+                                          : AppColors.border)
+                                      : AppColors.primaryMain,
                               width: 1,
                             ),
                             shape: RoundedRectangleBorder(
@@ -641,11 +661,13 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                                   canOpenCachedRecommendation,
                             ),
                             style: AppTextStyles.bodyM.copyWith(
-                              color: _isHost
-                                  ? ((_latestRecommendation != null || allCompleted)
-                                      ? AppColors.primaryMain
-                                      : AppColors.textSecondary)
-                                  : AppColors.primaryMain,
+                              color:
+                                  _isHost
+                                      ? ((_latestRecommendation != null ||
+                                              allCompleted)
+                                          ? AppColors.primaryMain
+                                          : AppColors.textSecondary)
+                                      : AppColors.primaryMain,
                             ),
                           ),
                         ),
@@ -662,7 +684,9 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     );
   }
 
-  Future<void> _showParticipantPreferenceModal(RoomParticipant participant) async {
+  Future<void> _showParticipantPreferenceModal(
+    RoomParticipant participant,
+  ) async {
     String? preferenceText = _findParticipantPreference(participant);
     final participantId = participant.participantId;
 
@@ -688,7 +712,8 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
       }
     }
 
-    final hasPreference = preferenceText != null && preferenceText.trim().isNotEmpty;
+    final hasPreference =
+        preferenceText != null && preferenceText.trim().isNotEmpty;
     if (!mounted) {
       return;
     }
@@ -734,8 +759,8 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                     hasPreference
                         ? preferenceText!
                         : participant.status == ParticipantStatus.completed
-                            ? '입력 완료 상태입니다.\n서버 연동 후 상세 취향을 불러올 수 있어요.'
-                            : '아직 취향을 입력하지 않았어요.',
+                        ? '입력 완료 상태입니다.\n서버 연동 후 상세 취향을 불러올 수 있어요.'
+                        : '아직 취향을 입력하지 않았어요.',
                     style: AppTextStyles.bodyM.copyWith(
                       color: AppColors.textSecondary,
                     ),
@@ -770,10 +795,13 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => AiResultScreen(
-          roomId: widget.roomId,
-          recommendation: response,
-        ),
+        builder:
+            (context) => AiResultScreen(
+              roomId: widget.roomId,
+              recommendation: response,
+              participantId: widget.participantId,
+              accessToken: widget.accessToken,
+            ),
       ),
     );
   }
@@ -782,9 +810,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
 class _InviteCodeCard extends StatelessWidget {
   final String inviteCode;
 
-  const _InviteCodeCard({
-    required this.inviteCode,
-  });
+  const _InviteCodeCard({required this.inviteCode});
 
   @override
   Widget build(BuildContext context) {
@@ -794,10 +820,7 @@ class _InviteCodeCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.border,
-          width: 1,
-        ),
+        border: Border.all(color: AppColors.border, width: 1),
       ),
       child: Row(
         children: [
@@ -824,13 +847,11 @@ class _InviteCodeCard extends StatelessWidget {
           ),
           TextButton(
             onPressed: () async {
-              await Clipboard.setData(
-                ClipboardData(text: inviteCode),
-              );
+              await Clipboard.setData(ClipboardData(text: inviteCode));
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('초대 코드를 복사했습니다')),
-                );
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('초대 코드를 복사했습니다')));
               }
             },
             style: TextButton.styleFrom(
@@ -865,9 +886,7 @@ class _SectionTitle extends StatelessWidget {
       children: [
         Text(
           title,
-          style: AppTextStyles.bodyM.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
+          style: AppTextStyles.bodyM.copyWith(fontWeight: FontWeight.w600),
         ),
       ],
     );
@@ -878,19 +897,18 @@ class _ParticipantCard extends StatelessWidget {
   final RoomParticipant participant;
   final VoidCallback onTap;
 
-  const _ParticipantCard({
-    required this.participant,
-    required this.onTap,
-  });
+  const _ParticipantCard({required this.participant, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = participant.status == ParticipantStatus.completed
-        ? AppColors.success
-        : AppColors.textSecondary;
-    final statusBackground = participant.status == ParticipantStatus.completed
-        ? AppColors.success.withValues(alpha: 0.12)
-        : AppColors.surface;
+    final statusColor =
+        participant.status == ParticipantStatus.completed
+            ? AppColors.success
+            : AppColors.textSecondary;
+    final statusBackground =
+        participant.status == ParticipantStatus.completed
+            ? AppColors.success.withValues(alpha: 0.12)
+            : AppColors.surface;
     final statusText =
         participant.status == ParticipantStatus.completed ? '입력 완료' : '입력 중';
 
@@ -905,24 +923,23 @@ class _ParticipantCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: AppColors.border,
-              width: 1,
-            ),
+            border: Border.all(color: AppColors.border, width: 1),
           ),
           child: Row(
             children: [
               CircleAvatar(
                 radius: 20,
-                backgroundColor: participant.isMe
-                    ? AppColors.primaryMain.withValues(alpha: 0.15)
-                    : AppColors.surface,
+                backgroundColor:
+                    participant.isMe
+                        ? AppColors.primaryMain.withValues(alpha: 0.15)
+                        : AppColors.surface,
                 child: Text(
                   participant.name.isNotEmpty ? participant.name[0] : '?',
                   style: AppTextStyles.bodyM.copyWith(
-                    color: participant.isMe
-                        ? AppColors.primaryMain
-                        : AppColors.textSecondary,
+                    color:
+                        participant.isMe
+                            ? AppColors.primaryMain
+                            : AppColors.textSecondary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -937,7 +954,10 @@ class _ParticipantCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: statusBackground,
                   borderRadius: BorderRadius.circular(999),

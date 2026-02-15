@@ -5,6 +5,7 @@ import 'package:kakao_map_sdk/kakao_map_sdk.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import 'models/place_detail_response.dart';
+import 'models/place_selection_summary_response.dart';
 import 'models/place_search_response.dart';
 import 'place_search_api.dart';
 import '../room/models/menu_recommendation_response.dart';
@@ -12,11 +13,15 @@ import '../room/models/menu_recommendation_response.dart';
 class MapListScreen extends StatefulWidget {
   final String roomId;
   final MenuRecommendationResponse recommendation;
+  final String? participantId;
+  final String? accessToken;
 
   const MapListScreen({
     super.key,
     required this.roomId,
     required this.recommendation,
+    this.participantId,
+    this.accessToken,
   });
 
   @override
@@ -33,6 +38,12 @@ class _MapListScreenState extends State<MapListScreen> {
   LatLng? _origin;
   String? _errorText;
   bool _loading = true;
+  bool _isSubmittingSelection = false;
+  bool _isSpinning = false;
+  PlaceSelectionSummaryResponse? _selectionSummary;
+
+  bool get _isHost =>
+      widget.accessToken != null && widget.accessToken!.isNotEmpty;
 
   @override
   void initState() {
@@ -43,6 +54,14 @@ class _MapListScreenState extends State<MapListScreen> {
   @override
   Widget build(BuildContext context) {
     final selectedCount = _items.where((item) => item.isSelected).length;
+    final myCompleted = _selectionSummary?.myCompleted ?? false;
+    final allCompleted = _selectionSummary?.allCompleted ?? false;
+    final canPressAction = _canPressActionButton(selectedCount);
+    final actionLabel = _buildActionButtonLabel(
+      selectedCount: selectedCount,
+      myCompleted: myCompleted,
+      allCompleted: allCompleted,
+    );
 
     return Scaffold(
       backgroundColor: AppColors.backgroundTint,
@@ -67,6 +86,20 @@ class _MapListScreenState extends State<MapListScreen> {
                           ),
                         ),
                       ),
+                    if (_selectionSummary != null &&
+                        _selectionSummary!.candidateNames.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: Text(
+                          '전체 후보: ${_selectionSummary!.candidateNames.join(' • ')}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     Expanded(child: _buildList()),
                   ],
                 ),
@@ -82,17 +115,9 @@ class _MapListScreenState extends State<MapListScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed:
-                      selectedCount == 0
-                          ? null
-                          : () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  '룰렛 화면 연결 예정 ($selectedCount곳 선택됨)',
-                                ),
-                              ),
-                            );
-                          },
+                      canPressAction
+                          ? () => _handleActionButtonTap(selectedCount)
+                          : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primaryMain,
                     disabledBackgroundColor: AppColors.border,
@@ -103,12 +128,12 @@ class _MapListScreenState extends State<MapListScreen> {
                     ),
                   ),
                   child: Text(
-                    '룰렛 돌리기 ($selectedCount곳 선택됨)',
+                    actionLabel,
                     style: AppTextStyles.buttonText.copyWith(
                       color:
-                          selectedCount == 0
-                              ? AppColors.textSecondary
-                              : Colors.white,
+                          canPressAction
+                              ? Colors.white
+                              : AppColors.textSecondary,
                     ),
                   ),
                 ),
@@ -276,6 +301,199 @@ class _MapListScreenState extends State<MapListScreen> {
       if (mounted) {
         setState(() {
           _loading = false;
+        });
+      }
+      await _refreshSelectionSummary();
+    }
+  }
+
+  bool _canPressActionButton(int selectedCount) {
+    if (_isSubmittingSelection || _isSpinning) {
+      return false;
+    }
+    if (_isHost) {
+      if ((_selectionSummary?.myCompleted ?? false) &&
+          (_selectionSummary?.allCompleted ?? false)) {
+        return true;
+      }
+      return selectedCount > 0;
+    }
+    return selectedCount > 0;
+  }
+
+  String _buildActionButtonLabel({
+    required int selectedCount,
+    required bool myCompleted,
+    required bool allCompleted,
+  }) {
+    if (_isSubmittingSelection) {
+      return '선택 저장 중...';
+    }
+    if (_isSpinning) {
+      return '룰렛 추첨 중...';
+    }
+    if (_isHost) {
+      if (!myCompleted) {
+        return '내 선택 완료하기 ($selectedCount곳)';
+      }
+      if (!allCompleted) {
+        return '다른 참가자 선택 대기 중';
+      }
+      return '룰렛 돌리기 (${_selectionSummary?.totalSelectedCount ?? selectedCount}표)';
+    }
+    if (myCompleted) {
+      return '내 선택 다시 저장하기 ($selectedCount곳)';
+    }
+    return '내 선택 완료하기 ($selectedCount곳)';
+  }
+
+  Future<void> _handleActionButtonTap(int selectedCount) async {
+    if (_isHost) {
+      final myCompleted = _selectionSummary?.myCompleted ?? false;
+      if (!myCompleted) {
+        await _submitMySelections(selectedCount);
+        return;
+      }
+
+      final allCompleted = _selectionSummary?.allCompleted ?? false;
+      if (!allCompleted) {
+        final incomplete =
+            _selectionSummary?.participants
+                .where((participant) => !participant.completed)
+                .map((participant) => participant.displayName)
+                .where((name) => name.trim().isNotEmpty)
+                .toList() ??
+            const <String>[];
+        final suffix = incomplete.isEmpty ? '' : ': ${incomplete.join(', ')}';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('아직 선택을 완료하지 않은 참가자가 있어요$suffix')),
+        );
+        return;
+      }
+      await _spinRoulette();
+      return;
+    }
+
+    await _submitMySelections(selectedCount);
+  }
+
+  Future<void> _submitMySelections(int selectedCount) async {
+    if (selectedCount <= 0 || _isSubmittingSelection) {
+      return;
+    }
+    setState(() {
+      _isSubmittingSelection = true;
+    });
+
+    try {
+      final selectedPlaces =
+          _items
+              .where((item) => item.isSelected)
+              .map(
+                (item) => {
+                  'placeName': item.name,
+                  'providerPlaceId': item.providerPlaceId,
+                },
+              )
+              .toList();
+      final response = await _placeSearchApi.submitSelections(
+        roomId: widget.roomId,
+        participantId: widget.participantId,
+        accessToken: widget.accessToken,
+        places: selectedPlaces,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectionSummary = response;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('내 선택을 저장했습니다')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('선택 저장에 실패했습니다: $error')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmittingSelection = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _refreshSelectionSummary() async {
+    try {
+      final response = await _placeSearchApi.getSelectionSummary(
+        roomId: widget.roomId,
+        participantId: widget.participantId,
+        accessToken: widget.accessToken,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectionSummary = response;
+      });
+    } catch (_) {
+      // 선택 현황은 화면 보조 정보이므로 실패 시 무시합니다.
+    }
+  }
+
+  Future<void> _spinRoulette() async {
+    if (!_isHost || widget.accessToken == null || widget.accessToken!.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('방장만 룰렛을 돌릴 수 있어요')));
+      return;
+    }
+    if (_isSpinning) {
+      return;
+    }
+    setState(() {
+      _isSpinning = true;
+    });
+
+    try {
+      final response = await _placeSearchApi.spinRoulette(
+        roomId: widget.roomId,
+        accessToken: widget.accessToken!,
+      );
+      if (!mounted) {
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('룰렛 결과'),
+            content: Text('오늘의 식당은 ${response.selectedPlaceName}입니다.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('확인'),
+              ),
+            ],
+          );
+        },
+      );
+      await _refreshSelectionSummary();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('룰렛 추첨에 실패했습니다: $error')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSpinning = false;
         });
       }
     }
