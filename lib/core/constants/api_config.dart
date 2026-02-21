@@ -1,15 +1,5 @@
-import 'package:flutter/foundation.dart';
-
 class ApiConfig {
-  static String get baseUrl {
-    if (kIsWeb) {
-      return 'http://localhost:8080';
-    }
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:8080';
-    }
-    return 'http://localhost:8080';
-  }
+  static const String baseUrl = 'https://smiling-pearl-mwukzi-7e08f4fc.koyeb.app';
 
   static Uri buildUri(String path) {
     final normalized = path.startsWith('/') ? path : '/$path';
