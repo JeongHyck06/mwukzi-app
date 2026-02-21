@@ -58,6 +58,8 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   bool _isLeaving = false;
   bool _isConnecting = false;
   bool _isRecommending = false;
+  bool _isDisposed = false;
+  int _sseReconnectAttempt = 0;
   List<RoomParticipant> _participants = [];
   MenuRecommendationResponse? _latestRecommendation;
   String? _latestRecommendationSignature;
@@ -66,6 +68,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
   final Map<String, String> _freeTextByParticipantId = {};
   RoomSseClient? _sseClient;
   StreamSubscription<String>? _sseSubscription;
+  Timer? _sseReconnectTimer;
 
   bool get _isHost => widget.accessToken != null;
 
@@ -305,19 +308,30 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
 
   @override
   void dispose() {
+    _isDisposed = true;
+    _sseReconnectTimer?.cancel();
     _sseSubscription?.cancel();
     _sseClient?.close();
     super.dispose();
   }
 
   void _connectSse() {
-    setState(() {
-      _isConnecting = true;
-    });
+    if (_isDisposed) {
+      return;
+    }
+    _sseReconnectTimer?.cancel();
+    _sseSubscription?.cancel();
+    _sseClient?.close();
+    if (mounted) {
+      setState(() {
+        _isConnecting = true;
+      });
+    }
     final url = RoomApi().buildSseUrl(inviteCode: widget.inviteCode);
     _sseClient = createRoomSseClient(url);
     _sseSubscription = _sseClient!.messages.listen(
       (data) {
+        _sseReconnectAttempt = 0;
         if (data.trim().isEmpty) {
           return;
         }
@@ -346,20 +360,30 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
         }
       },
       onError: (error) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('실시간 연결 오류: $error')));
-        }
+        debugPrint('[RoomLobby][SSE] error: $error');
+        _scheduleSseReconnect();
       },
       onDone: () {
-        if (mounted) {
-          setState(() {
-            _isConnecting = false;
-          });
-        }
+        debugPrint('[RoomLobby][SSE] stream closed');
+        _scheduleSseReconnect();
       },
     );
+  }
+
+  void _scheduleSseReconnect() {
+    if (_isDisposed || _isLeaving) {
+      return;
+    }
+    _sseReconnectTimer?.cancel();
+    final nextAttempt = _sseReconnectAttempt + 1;
+    _sseReconnectAttempt = nextAttempt;
+    final delaySeconds = nextAttempt > 5 ? 10 : nextAttempt * 2;
+    if (mounted) {
+      setState(() {
+        _isConnecting = true;
+      });
+    }
+    _sseReconnectTimer = Timer(Duration(seconds: delaySeconds), _connectSse);
   }
 
   void _updateParticipants(List<RoomParticipantResponse> response) {

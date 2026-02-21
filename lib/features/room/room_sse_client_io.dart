@@ -17,7 +17,16 @@ class RoomSseClientIo implements RoomSseClient {
   void _connect(String url) async {
     try {
       final request = http.Request('GET', Uri.parse(url));
+      request.headers['Accept'] = 'text/event-stream';
+      request.headers['Cache-Control'] = 'no-cache';
+      request.headers['Connection'] = 'keep-alive';
       final response = await _client.send(request);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        _controller.addError(
+          StateError('SSE 연결 실패 (status: ${response.statusCode})'),
+        );
+        return;
+      }
       _subscription = response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())
